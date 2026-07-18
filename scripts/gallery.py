@@ -81,7 +81,11 @@ def _render_html(rows) -> str:
     def img_cell(fname):
         if not fname:
             return "<td>(failed)</td>"
-        return f'<td><img src="{fname}" style="max-width:420px;border:1px solid #ccc"></td>'
+        # mtime query string busts the browser image cache: the PNG filenames
+        # are stable across regenerations, and browsers happily reuse cached
+        # images on plain refresh (especially for file:// pages).
+        mtime = int(os.path.getmtime(os.path.join(OUT, fname)))
+        return f'<td><img src="{fname}?v={mtime}" style="max-width:420px;border:1px solid #ccc"></td>'
 
     trs = []
     for r in rows:
