@@ -6,37 +6,72 @@ _FALLBACK_W, _FALLBACK_H = 400, 300
 _MIN_INCH = 2.2  # floor for the inner-plot rect; below this, labels/legends clip
 
 
-def _band_size_px(cspec, scale, axis: str) -> float | None:
-    """Approximate pixel extent for a band/point-scale-driven axis.
+def _axis_step_px(cspec, scales: dict, scale, axis: str) -> float:
+    """Resolve the `<axis>_step` Vega signal to a px-per-category step.
 
-    Vega derives this from a `<axis>_step` signal + `bandspace()`; we use the
-    simpler `n_cats * step / band_frac` approximation noted in the plan.
+    Usually a literal (`{"name": "x_step", "value": 20}`, Vega's own default).
+    For a grouped/faceted chart (an `xOffset`/`yOffset` sub-scale, e.g.
+    `xOffset="grp:N"`), Vega instead emits a computed `update` signal --
+    `x_step = offsetStep * bandspace(offsetCount, 0, 0) / (1 - x.paddingInner)`,
+    which simplifies to `offsetStep * offsetCount / (1 - paddingInner)` since
+    `bandspace(n, 0, 0) == n` -- and we only see it as an unresolved `update`
+    (no literal `value`) in `cspec.signals`. Re-derive it from the offset
+    scale's own (already-parsed) step/category-count in that case.
     """
+    step = cspec.signals.get(f"{axis}_step")
+    if step is not None:
+        return step
+    offset_name = f"{axis}Offset"
+    offset_scale = scales.get(offset_name)
+    offset_spec = cspec.scales.get(offset_name)
+    if offset_scale and offset_spec and scale is not None and scale.band_frac:
+        offset_step = (offset_spec.get("range") or {}).get("step")
+        n_offset = len(offset_scale.categories or [])
+        if isinstance(offset_step, (int, float)) and n_offset:
+            return offset_step * n_offset / scale.band_frac
+    return 20  # Vega's own default step
+
+
+def _band_size_px(cspec, scales: dict, axis: str) -> float | None:
+    """Exact pixel extent for a band/point-scale-driven axis.
+
+    Vega derives this from a `<axis>_step` signal and
+    `bandspace(count, paddingInner, paddingOuter) = count - paddingInner + 2 * paddingOuter`
+    (see vega-scale's `bandSpace`), then `width/height = bandspace(...) * step`.
+    Reuses the scale's already-resolved paddingInner/paddingOuter (`_scales._band_paddings`)
+    instead of re-deriving them.
+    """
+    scale = scales.get(axis)
     if scale is None or scale.vtype not in ("band", "point") or not scale.categories:
         return None
     n = len(scale.categories)
-    step = cspec.signals.get(f"{axis}_step", 20)
-    band_frac = scale.band_frac or 1.0
-    return n * step / band_frac
-
-
-_MIN_AXES_PX = 160  # floor applied to the TARGET axes-box px, not the figure
+    step = _axis_step_px(cspec, scales, scale, axis)
+    bandspace = n - scale.paddingInner + 2 * scale.paddingOuter
+    return bandspace * step
 
 
 def target_axes_px(cspec, scales: dict | None = None) -> tuple[float, float]:
-    """The target axes-box size (px): Vega's width/height, or a band-count
-    estimate when the spec has no numeric dims, floored to `_MIN_AXES_PX`."""
+    """The target axes-box size (px): Vega's width/height, or an exact
+    band-scale size when the spec has no numeric dims. Both are authoritative
+    (Vega/the band math intentionally sized the axes) and are never floored;
+    when neither is available, `_FALLBACK_W`/`_FALLBACK_H` are generous
+    enough on their own that labels/legends don't clip, so no extra floor
+    is applied."""
     scales = scales or {}
     w = cspec.width
     if w is None:
-        w = _band_size_px(cspec, scales.get("x"), "x") or _FALLBACK_W
+        w = _band_size_px(cspec, scales, "x")
+        if w is None:
+            w = _FALLBACK_W
     h = cspec.height
     if h is None:
-        h = _band_size_px(cspec, scales.get("y"), "y") or _FALLBACK_H
-    return max(w, _MIN_AXES_PX), max(h, _MIN_AXES_PX)
+        h = _band_size_px(cspec, scales, "y")
+        if h is None:
+            h = _FALLBACK_H
+    return w, h
 
 
-def make_figure(cspec, scales: dict | None = None, ax=None):
+def make_figure(cspec, scales: dict | None = None, ax=None, axes_px: tuple[float, float] | None = None):
     """Create (or reuse) a Figure/Axes sized from the spec's plot dims.
 
     Vega width/height describe the INNER plot rect (axis labels/legends live
@@ -45,10 +80,15 @@ def make_figure(cspec, scales: dict | None = None, ax=None):
     layout needs to run at least once to know how much chrome it carves out).
     Here we just pick a starting figsize equal to the target px (a reasonable
     first guess) so `ax=None` callers get a sane initial canvas.
+
+    `axes_px`, if given, is a precomputed `target_axes_px(cspec, scales)` --
+    lets a caller that needs the same value elsewhere (e.g. for `draw_marks`
+    and `finalize_figure_size`) compute it once and share it instead of
+    recomputing it here.
     """
     import matplotlib.pyplot as plt
 
-    w, h = target_axes_px(cspec, scales)
+    w, h = axes_px if axes_px is not None else target_axes_px(cspec, scales)
     fig_w, fig_h = w / _DPI, h / _DPI
     fig_w = max(fig_w, _MIN_INCH)
     fig_h = max(fig_h, _MIN_INCH)
@@ -77,11 +117,10 @@ def finalize_figure_size(fig, ax, target_w_px: float, target_h_px: float, iterat
     the shortfall, and grow the figure by exactly that shortfall. A second
     pass corrects for any small shift in chrome size caused by the first
     resize (e.g. tick label widths changing). Skipped entirely when the
-    caller supplied their own `ax=` -- they own layout in that path.
+    caller supplied their own `ax=` -- they own layout in that path. The
+    caller (`target_axes_px`) is responsible for flooring unknown/degenerate
+    targets; a real Vega/band-derived size is never clamped here.
     """
-    target_w_px = max(target_w_px, _MIN_AXES_PX)
-    target_h_px = max(target_h_px, _MIN_AXES_PX)
-
     for _ in range(iterations):
         fig.canvas.draw()
         bbox = ax.get_window_extent()

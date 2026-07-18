@@ -62,14 +62,20 @@ def convert(chart_or_vl_dict, ax=None, style: str | None = "vega-lite"):
 
     with _style_context(style):
         scales = build_scales(cspec)
-        fig, ax = make_figure(cspec, scales=scales, ax=ax)
+        # The authoritative target axes-box px size (Vega's own width/height,
+        # or the exact band-derived size); a pure function of cspec/scales,
+        # so it's computed once here and shared by figure sizing (initial
+        # guess + final resize) and mark drawing (px->data conversion for
+        # compiled bin-spacing offsets) rather than recomputed at each site.
+        axes_px = target_axes_px(cspec, scales)
+        fig, ax = make_figure(cspec, scales=scales, ax=ax, axes_px=axes_px)
 
         if "x" in scales:
             apply_position_scale(ax, scales["x"], "x")
         if "y" in scales:
             apply_position_scale(ax, scales["y"], "y")
 
-        registry, symbol_style = draw_marks(ax, cspec, scales)
+        registry, symbol_style = draw_marks(ax, cspec, scales, axes_px)
         apply_axes(ax, cspec, scales)
         apply_legends(fig, ax, cspec, scales, registry, symbol_style)
 
@@ -78,7 +84,7 @@ def convert(chart_or_vl_dict, ax=None, style: str | None = "vega-lite"):
             # the axes box itself (not the whole figure) matches that target
             # -- see `finalize_figure_size`. When the caller supplied `ax`,
             # they own layout and we leave sizing alone.
-            target_w_px, target_h_px = target_axes_px(cspec, scales)
+            target_w_px, target_h_px = axes_px
             finalize_figure_size(fig, ax, target_w_px, target_h_px)
 
         # Must run AFTER any figure resize: mpl's auto locators recompute

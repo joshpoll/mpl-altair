@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import itertools
 import math
+import re
 import warnings
 from typing import Any, Iterator, NamedTuple
 
@@ -85,11 +86,14 @@ def walk_drawable_marks(marks: list[dict]) -> Iterator[DrawableMark]:
 def resolve_channel(entry: dict, row: dict, scales: dict):
     """Resolve one Vega encode channel entry to a data-space value for a single row.
 
-    A nested `offset` sub-entry (band-group offsets, histogram px-nudges) is
+    A nested `offset` sub-entry (band-group offsets, bin-spacing px-nudges) is
     ignored here -- band-x/band-y bar drawing resolves field-valued offsets
-    itself (see `_position_with_offset_resolver`); signal-valued offsets are
-    cosmetic pixel nudges from Vega's rendering path that we don't reproduce
-    (not pixel-fidelity chasing, by design -- no warning, this is expected).
+    itself (see `_position_with_offset_resolver`), and `_draw_bar_linear`
+    resolves the signal-valued compiled bin-spacing offset on a histogram's
+    x/x2 (or y/y2) edges itself (see `_bin_gap_offset_data`). Any other
+    signal-valued offset is a cosmetic pixel nudge from Vega's rendering path
+    that we don't reproduce (not pixel-fidelity chasing, by design -- no
+    warning, this is expected).
     """
     if entry is None:
         return None
@@ -140,6 +144,60 @@ def _position_with_offset_resolver(entry: dict | None, scales: dict):
     return resolve
 
 
+# Vega-Lite compiles a binned bar/tick's continuous-axis edges (x/x2 or
+# y/y2) with a per-row pixel `offset` signal that implements `binSpacing`
+# (default 1px) -- shrinking each bin rect by that many px so adjacent bars
+# show a hairline gap. The signal has the shape
+#   `H + (<tiny-bin guard> ? <split-gap math> : E)`
+# where H is a leading constant and E is the ternary's else-branch constant;
+# for any bin far wider than the gap (every realistic histogram) the guard is
+# false and the signal reduces to exactly `H + E` px, so we only need to
+# regex those two constants out, not evaluate the guard/expression. This is a
+# declared shortcut: pathologically thin bins (< ~0.25px wide, i.e. far more
+# bins than the chart has pixels) won't get VL's exact edge-collapse
+# treatment -- not visually distinguishable at that point anyway.
+_BIN_GAP_RE = re.compile(r"^\s*([\d.]+)\s*\+\s*\(.*?\?\s*.*?\s*:\s*(-?[\d.]+)\s*\)\s*$")
+
+
+def _bin_gap_offset_px(signal: str) -> float | None:
+    """The constant px offset a compiled bin-spacing signal reduces to for a
+    normal-width bin, or None if `signal` doesn't match that shape."""
+    m = _BIN_GAP_RE.match(signal)
+    if not m:
+        return None
+    h, e = float(m.group(1)), float(m.group(2))
+    return h + e
+
+
+def _bin_gap_offset_data(entry: dict | None, scale, axis_px: float | None, axis: str) -> float:
+    """Data-space delta for `entry`'s compiled bin-spacing pixel `offset`
+    (0.0 if there is none, or it doesn't match the known shape).
+
+    Converts px -> data units via the scale's domain span over the target
+    axes-box px extent (the same authoritative target `_layout.target_axes_px`
+    hands `finalize_figure_size`, not a post-layout measurement -- see
+    `draw_marks`). Vega's x pixel axis increases left-to-right like mpl's
+    (un-inverted) x data axis, so a +px offset is a +data delta; Vega's y
+    pixel axis increases top-to-bottom while mpl's y data axis (also
+    un-inverted for continuous scales) increases bottom-to-top, so a +px
+    offset there is a -data delta.
+    """
+    offset = entry.get("offset") if entry else None
+    if not offset or "signal" not in offset:
+        return 0.0
+    gap_px = _bin_gap_offset_px(offset["signal"])
+    if not gap_px or scale is None or not axis_px:
+        return 0.0
+    domain = scale.domain
+    if not (isinstance(domain, list) and len(domain) == 2):
+        return 0.0
+    lo, hi = domain
+    if hi == lo:
+        return 0.0
+    data_per_px = (hi - lo) / axis_px
+    return gap_px * data_per_px if axis == "x" else -gap_px * data_per_px
+
+
 def _px_to_pt_area(px_area: float, dpi: float) -> float:
     """Vega symbol `size` is the true area (px^2) of a circular glyph, d3-style
     (radius = sqrt(size/pi), so diameter = 2*sqrt(size/pi)). mpl scatter `s` is
@@ -174,6 +232,10 @@ def draw_symbol(ax, mark: dict, cspec, scales: dict, registry: dict, dpi: float)
     fill_entry = update.get("fill")
     stroke_entry = update.get("stroke")
     size_entry = update.get("size")
+    opacity_entry = update.get("opacity")
+    # Only a literal {"value": N} opacity is handled; a field/scale-valued
+    # opacity channel is silently dropped (declared scope limit).
+    alpha = opacity_entry["value"] if opacity_entry and "value" in opacity_entry else None
 
     fill_scale = _channel_scale(fill_entry, scales)
     stroke_scale = _channel_scale(stroke_entry, scales)
@@ -223,7 +285,7 @@ def draw_symbol(ax, mark: dict, cspec, scales: dict, registry: dict, dpi: float)
             ys = [resolve_channel(y_entry, r, scales) for r in grows]
             s = sizes_for(grows)
             color = color_scale.color_for(cat)
-            kwargs: dict[str, Any] = dict(s=s, label=str(cat))
+            kwargs: dict[str, Any] = dict(s=s, label=str(cat), alpha=alpha)
             if color_is_fill:
                 kwargs["c"] = color
                 if stroke_literal is not None:
@@ -243,11 +305,11 @@ def draw_symbol(ax, mark: dict, cspec, scales: dict, registry: dict, dpi: float)
         vals = [r.get(color_field) for r in rows]
         s = sizes_for(rows)
         if color_is_fill:
-            ax.scatter(xs, ys, s=s, c=vals, cmap=cmap, norm=norm)
+            ax.scatter(xs, ys, s=s, c=vals, cmap=cmap, norm=norm, alpha=alpha)
         else:
             edge_colors = cmap(norm(np.asarray(vals)))
             ax.scatter(xs, ys, s=s, edgecolors=edge_colors, linewidths=default_edge_lw,
-                       c=fill_literal if fill_literal is not None else "none")
+                       c=fill_literal if fill_literal is not None else "none", alpha=alpha)
         # No per-point legend handles for a continuous scale; _guides builds a
         # colorbar directly from the scale (looked up by name), not the registry.
     else:
@@ -255,7 +317,7 @@ def draw_symbol(ax, mark: dict, cspec, scales: dict, registry: dict, dpi: float)
         ys = [resolve_channel(y_entry, r, scales) for r in rows]
         s = sizes_for(rows)
         lw = default_edge_lw if stroke_literal is not None else None
-        ax.scatter(xs, ys, s=s, c=fill_literal, edgecolors=stroke_literal, linewidths=lw)
+        ax.scatter(xs, ys, s=s, c=fill_literal, edgecolors=stroke_literal, linewidths=lw, alpha=alpha)
 
     return symbol_style
 
@@ -526,28 +588,44 @@ def _draw_bar_band(ax, rows: list[dict], update: dict, scales: dict, band_scale,
         bar(bands, extents, **{base_kwarg: val2s, size_kwarg: size}, color=fill_val)
 
 
-def _draw_bar_linear(ax, rows: list[dict], update: dict, scales: dict) -> None:
-    """Histogram / linear-x rect: x/x2 are scaled bin-edge fields, y2 a scaled-value 0."""
+def _draw_bar_linear(ax, rows: list[dict], update: dict, scales: dict, x_scale, y_scale,
+                      axes_px: tuple[float, float]) -> None:
+    """Histogram / linear-x rect: x/x2 (or y/y2, for a horizontal histogram)
+    are scaled bin-edge fields, the other pair a scaled-value 0. Each edge
+    may carry a compiled bin-spacing pixel `offset` (see
+    `_bin_gap_offset_data`) that we add in as a data-space delta so adjacent
+    bins render with VL's default 1px gap instead of flush."""
     x_entry, x2_entry = update.get("x"), update.get("x2")
     y_entry, y2_entry = update.get("y"), update.get("y2")
+    axes_w_px, axes_h_px = axes_px
 
     x_pos = _position_with_offset_resolver(x_entry, scales)
     x2_pos = _position_with_offset_resolver(x2_entry, scales) if x2_entry else None
 
-    xs = [x_pos(r) for r in rows]
-    x2s = [x2_pos(r) for r in rows] if x2_pos else [0.0] * len(rows)
-    ys = [resolve_channel(y_entry, r, scales) for r in rows]
-    y2s = [resolve_channel(y2_entry, r, scales) for r in rows] if y2_entry else [0.0] * len(rows)
+    x_gap = _bin_gap_offset_data(x_entry, x_scale, axes_w_px, "x")
+    x2_gap = _bin_gap_offset_data(x2_entry, x_scale, axes_w_px, "x")
+    y_gap = _bin_gap_offset_data(y_entry, y_scale, axes_h_px, "y")
+    y2_gap = _bin_gap_offset_data(y2_entry, y_scale, axes_h_px, "y")
+
+    xs = [x_pos(r) + x_gap for r in rows]
+    x2s = [x2_pos(r) + x2_gap for r in rows] if x2_pos else [0.0] * len(rows)
+    # y/y2 use plain resolve_channel (not the offset-resolver): in the
+    # not-band/not-band path (this function) a field-valued offset can't
+    # occur, so the offset-resolving generality would be dead code here.
+    ys = [resolve_channel(y_entry, r, scales) + y_gap for r in rows]
+    y2s = [resolve_channel(y2_entry, r, scales) + y2_gap for r in rows] if y2_entry else [0.0] * len(rows)
 
     lefts = [min(a, b) for a, b in zip(xs, x2s)]
     widths = [abs(b - a) for a, b in zip(xs, x2s)]
-    heights = [y - y2 for y, y2 in zip(ys, y2s)]
+    bottoms = [min(a, b) for a, b in zip(ys, y2s)]
+    heights = [abs(a - b) for a, b in zip(ys, y2s)]
 
     fill_val = _literal_color(update.get("fill"))
-    ax.bar(lefts, heights, width=widths, bottom=y2s, align="edge", color=fill_val)
+    ax.bar(lefts, heights, width=widths, bottom=bottoms, align="edge", color=fill_val)
 
 
-def draw_rect(ax, mark: dict, cspec, scales: dict, registry: dict, dpi: float) -> None:
+def draw_rect(ax, mark: dict, cspec, scales: dict, registry: dict, dpi: float,
+              axes_px: tuple[float, float]) -> None:
     update = mark.get("encode", {}).get("update", {})
     dataset_name = mark.get("from", {}).get("data")
     rows = cspec.datasets.get(dataset_name, [])
@@ -575,15 +653,28 @@ def draw_rect(ax, mark: dict, cspec, scales: dict, registry: dict, dpi: float) -
     elif y_is_band and not x_is_band:
         _draw_bar_band(ax, rows, update, scales, y_scale, fill_field, fill_scale, registry, horizontal=True)
     elif not x_is_band and not y_is_band:
-        _draw_bar_linear(ax, rows, update, scales)
+        _draw_bar_linear(ax, rows, update, scales, x_scale, y_scale, axes_px)
     else:
         warnings.warn("rect mark with both x and y band scales not supported; skipping")
 
 
-def draw_marks(ax, cspec, scales: dict) -> MarkDrawResult:
+def draw_marks(ax, cspec, scales: dict, axes_px: tuple[float, float]) -> MarkDrawResult:
     """Draw all drawable marks; returns the legend-handle registry
     (`{scale_name: [(handle, label)]}`) plus the size-legend swatch style
-    recorded by a symbol mark's size scale, if any."""
+    recorded by a symbol mark's size scale, if any.
+
+    `axes_px` is the caller's precomputed `_layout.target_axes_px(cspec,
+    scales)` -- the authoritative target axes-box px size (Vega's own
+    width/height, or the exact band-derived size), not a measurement of the
+    actual canvas, which isn't converged to that target until
+    `finalize_figure_size` runs after all marks are drawn. Used to convert
+    compiled bin-spacing pixel offsets (see `_bin_gap_offset_data`) to data
+    units; safe to use ahead of that convergence because it and
+    `finalize_figure_size`'s target are the same pure function of
+    `cspec`/`scales`, not a render measurement. The caller computes it once
+    and shares it across figure sizing and mark drawing rather than
+    recomputing it here.
+    """
     registry: dict[str, list] = {}
     symbol_style: dict | None = None
     dpi = ax.figure.dpi
@@ -603,7 +694,7 @@ def draw_marks(ax, cspec, scales: dict) -> MarkDrawResult:
             draw_area(ax, mark, facet, cspec, scales, registry)
         elif mtype == "rect":
             _warn_if_faceted(facet, mtype)
-            draw_rect(ax, mark, cspec, scales, registry, dpi)
+            draw_rect(ax, mark, cspec, scales, registry, dpi, axes_px)
         elif mtype == "rule":
             _warn_if_faceted(facet, mtype)
             draw_rule(ax, mark, cspec, scales, registry)
