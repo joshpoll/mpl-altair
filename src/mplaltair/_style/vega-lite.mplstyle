@@ -1,0 +1,37 @@
+# Vega-Lite-ish default aesthetics for mpl-altair renders.
+#
+# This sheet only sets *style*, never anything that would affect layout math
+# (figsize, dpi handled separately in _layout.py) or data placement. Applied
+# scoped via plt.style.context() around figure creation + drawing -- never
+# globally -- so it never leaks into the caller's own mpl session.
+
+axes.prop_cycle: cycler('color', ['1f77b4', 'ff7f0e', '2ca02c', 'd62728', '9467bd', '8c564b', 'e377c2', '7f7f7f', 'bcbd22', '17becf'])
+
+font.family: sans-serif
+font.size: 11
+axes.labelsize: 11
+axes.titlesize: 13
+axes.titleweight: bold
+
+axes.grid: True
+axes.axisbelow: True
+grid.color: dddddd
+grid.linewidth: 0.8
+
+axes.spines.top: False
+axes.spines.right: False
+axes.edgecolor: 888888
+axes.linewidth: 0.8
+
+xtick.direction: out
+ytick.direction: out
+xtick.color: 888888
+ytick.color: 888888
+
+figure.facecolor: white
+axes.facecolor: white
+savefig.facecolor: white
+
+legend.frameon: False
+
+figure.dpi: 100

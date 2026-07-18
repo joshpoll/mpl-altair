@@ -1,0 +1,32 @@
+[project]
+name = "mpl-altair"
+version = "0.1.0"
+description = "A native matplotlib backend for Altair"
+readme = "README.md"
+authors = [
+    { name = "Josh Pollock", email = "jopo@mit.edu" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "altair>=6",
+    "vl-convert-python>=1.9",
+    "vegafusion>=2",
+    "matplotlib>=3.8",
+    "pandas",
+    "numpy",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
+
+[project.entry-points."altair.vegalite.v6.renderer"]
+mplaltair = "mplaltair._renderer:renderer"
+
+[build-system]
+requires = ["uv_build>=0.9.9,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "mplaltair"
