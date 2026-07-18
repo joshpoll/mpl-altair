@@ -2,6 +2,20 @@
 
 A prototype native matplotlib backend for [Altair](https://altair-viz.github.io/). It renders Altair charts as real matplotlib `Figure`/`Axes` objects, not as an image copy of Vega-Lite's own renderer. That means a chart from mpl-altair is a genuine matplotlib plot: you can theme it with any mpl style, embed it in a subplot grid next to other matplotlib plots, or export it through any matplotlib backend (PDF, SVG, PGF/LaTeX, and so on).
 
+## Examples
+
+Each pair shows the same Altair chart rendered by Vega-Lite's own renderer (left) and by mpl-altair (right). The goal is a semantic match, not a pixel match, so tick placement and label formatting differ where matplotlib's own conventions apply.
+
+| Altair (vl-convert) | mpl-altair |
+| --- | --- |
+| <img src="docs/images/bar_stacked_vl.png" height="260"> | <img src="docs/images/bar_stacked_ours.png" height="260"> |
+| <img src="docs/images/line_multi_temporal_vl.png" height="280"> | <img src="docs/images/line_multi_temporal_ours.png" height="280"> |
+| <img src="docs/images/scatter_size_vl.png" height="280"> | <img src="docs/images/scatter_size_ours.png" height="280"> |
+
+Because the output is a real matplotlib figure, any matplotlib style restyles the whole chart. This is the same stacked bar converted with `style="dark_background"`:
+
+<img src="docs/images/bar_stacked_dark_ours.png" height="260">
+
 ## How it works
 
 Altair charts are specified in Vega-Lite, a high-level grammar of graphics. mpl-altair does not reimplement Vega-Lite's semantics. Instead it reuses the real Vega-Lite compiler and the real Vega dataflow engine to do all the hard work, and only translates the fully resolved result into matplotlib calls:

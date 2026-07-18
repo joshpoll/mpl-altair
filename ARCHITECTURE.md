@@ -78,14 +78,14 @@ Color resolution follows the styling rule above. A named range such as `"categor
 - `{"scale": s, "field": f}` reads the field from the row and maps it through the scale's `to_data`.
 - `{"value": v}` is a literal.
 - `{"scale": s, "value": v}` is a literal in data space, e.g. a bar baseline of zero.
-- `{"field": f}` with no scale uses the scale paired with that channel, e.g. `x2` uses the x scale.
+- `{"field": f}` with no scale reads the raw value. In practice Vega always names the scale on position entries such as `x2`, so this case only carries values that are already in data space.
 - An entry with an `offset` sub dict adds a secondary band scale offset. Grouped bars use this.
 - Signal expressions are skipped with a warning.
 
 Each mark type has a drawer that builds arrays from the rows and makes one matplotlib call per series rather than per row.
 
 - Bars are `rect` marks. Band position bars become `ax.bar` or `ax.barh` with one call per color series, with heights and bottoms taken from the stack fields that vegafusion computed. Bars on a linear axis, which is how histograms compile, use the bin edge fields for position and width.
-- A thin `rect` (a fixed width or height of a few pixels) is a tick mark. We detect the thin dimension from the encode and draw a LineCollection of short strokes that span the category band.
+- A `rect` mark whose Vega `style` tag is `"tick"` is a tick mark. Vega labels every compiled rect with its source mark type, so we read that tag rather than guessing from the geometry. The encode then says which dimension is the thin one, and we draw a LineCollection of short strokes that span the category band.
 - `symbol` marks become `ax.scatter`. Categorical color draws one scatter call per category so each gets a legend handle. Continuous color computes per point colors from the colormap. Sizes convert from Vega's area in square pixels to matplotlib's point squared units, including the factor of 4 over pi that accounts for Vega measuring true circle area while matplotlib measures squared diameter.
 - `line` and `area` marks group by series, sort by x, drop undefined rows, and call `ax.plot` or `ax.fill_between`.
 - `rule` marks become `axvline` or `axhline` when they span one axis, and a LineCollection when both endpoints are given.
