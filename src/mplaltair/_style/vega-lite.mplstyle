@@ -5,7 +5,10 @@
 # scoped via plt.style.context() around figure creation + drawing -- never
 # globally -- so it never leaks into the caller's own mpl session.
 
-axes.prop_cycle: cycler('color', ['1f77b4', 'ff7f0e', '2ca02c', 'd62728', '9467bd', '8c564b', 'e377c2', '7f7f7f', 'bcbd22', '17becf'])
+# Vega-Lite's default categorical scheme is the 2016 "tableau10" (not the
+# classic Tableau 10 that mpl ships as tab10) and its default ramp is blues.
+axes.prop_cycle: cycler('color', ['4c78a8', 'f58518', 'e45756', '72b7b2', '54a24b', 'eeca3b', 'b279a2', 'ff9da6', '9d755d', 'bab0ac'])
+image.cmap: Blues
 
 font.family: sans-serif
 font.size: 11
