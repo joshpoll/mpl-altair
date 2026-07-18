@@ -72,7 +72,6 @@ def convert(chart_or_vl_dict, ax=None, style: str | None = "vega-lite"):
         registry = draw_marks(ax, cspec, scales)
         apply_axes(ax, cspec, scales)
         apply_legends(fig, ax, cspec, scales, registry)
-        unclip_gridlines(ax)
 
         if not caller_supplied_ax:
             # Vega width/height are the INNER plot rect; grow the figure so
@@ -81,6 +80,11 @@ def convert(chart_or_vl_dict, ax=None, style: str | None = "vega-lite"):
             # they own layout and we leave sizing alone.
             target_w_px, target_h_px = target_axes_px(cspec, scales)
             finalize_figure_size(fig, ax, target_w_px, target_h_px)
+
+        # Must run AFTER any figure resize: mpl's auto locators recompute
+        # ticks for the new physical size, and freshly created tick objects
+        # come back with clipping re-enabled.
+        unclip_gridlines(ax)
 
     return fig
 

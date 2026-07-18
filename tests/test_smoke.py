@@ -162,3 +162,43 @@ def test_style_none_uses_callers_active_rcparams():
             assert face == to_rgba(custom_colors[0])
         finally:
             plt.close(fig)
+
+
+@pytest.mark.parametrize("name", ["bar_simple", "line_single", "tick"])
+def test_boundary_gridlines_render(name, tmp_path):
+    """Gridlines at the axes limits must survive rasterization (they sit on
+    the clip boundary, and figure resizing recreates tick objects with
+    clipping re-enabled -- both regressions seen in these charts)."""
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    builder = {c[0]: c[1] for c in CHARTS}[name]
+    fig = mplaltair.convert(builder())
+    try:
+        ax = fig.axes[0]
+        fig.canvas.draw()
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png")
+        im = np.asarray(Image.open(buf).convert("L"))
+        h, w = im.shape
+        bbox = ax.get_window_extent()
+
+        def has_grid_pixels(px_lo, px_hi, axis):
+            band = im[:, px_lo:px_hi] if axis == "col" else im[h - px_hi:h - px_lo, :]
+            grey = (band > 200) & (band < 245)
+            return grey.sum() > 20
+
+        for gl, axis, edge_px in (
+            (ax.xaxis.get_gridlines(), "col", bbox.x1),
+            (ax.yaxis.get_gridlines(), "row", bbox.y1),
+        ):
+            if not gl or not gl[0].get_visible():
+                continue
+            lo, hi = int(edge_px) - 2, int(edge_px) + 2
+            assert has_grid_pixels(lo, hi, axis), (
+                f"{name}: no gridline pixels at the {axis} boundary (~{edge_px:.0f}px)"
+            )
+    finally:
+        plt.close(fig)
