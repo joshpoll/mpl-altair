@@ -94,7 +94,7 @@ Drawers register their artists in a registry keyed by scale name, together with 
 
 ## Guides (`_guides.py`)
 
-Axis handling is deliberately thin. We set the axis title and the grid visibility from the spec, and we let matplotlib choose tick positions and formats. Log axes also enable minor gridlines because Vega draws a gridline at every log tick. The one workaround is `unclip_gridlines`, which turns off clipping on gridlines so the lines at the axes limits are not lost to rasterization at the clip boundary. This is only partly effective. See the known issues section of the README.
+Axis handling is deliberately thin. We set the axis title and the grid visibility from the spec, and we let matplotlib choose tick positions and formats. Log axes also enable minor gridlines because Vega draws a gridline at every log tick. The one workaround is `unclip_gridlines`, which turns off clipping on gridlines so the lines at the axes limits are not lost to rasterization at the clip boundary. This is only partly effective; see [#3](https://github.com/joshpoll/mpl-altair/issues/3).
 
 Legends come from the spec's legend list. A categorical legend takes its handles from the mark registry. A continuous color legend becomes a colorbar built from the scale's colormap and Normalize. A size legend builds three proxy swatches at the domain minimum, midpoint, and maximum, styled like the chart's marks.
 
