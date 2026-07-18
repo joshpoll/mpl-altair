@@ -68,6 +68,26 @@ def _resolve_signal_domain(domain: list, cspec) -> list | None:
     return [lo, hi]
 
 
+def _domain_from_pairs(pairs: list[tuple[list[dict], str]], vtype: str):
+    """Resolve a domain from `(rows, field)` pairs -- shared by the single- and
+    multi-dataset domain resolvers, which just differ in how they gather pairs."""
+    if vtype in ("linear", "log", "sqrt", "time", "utc"):
+        vals = [row[f] for rows, f in pairs for row in rows if row.get(f) is not None]
+        if not vals:
+            return None
+        return [min(vals), max(vals)]
+    # ordinal/nominal/band/point (categorical) -> unique, sorted category list.
+    cats: list = []
+    seen = set()
+    for rows, f in pairs:
+        for row in rows:
+            v = row.get(f)
+            if v is not None and v not in seen:
+                seen.add(v)
+                cats.append(v)
+    return sorted(cats)
+
+
 def _resolve_data_ref_domain(domain: dict, cspec, vtype: str):
     """Domain expressed as {data, field(s), sort}."""
     dataset_name = domain.get("data")
@@ -76,21 +96,7 @@ def _resolve_data_ref_domain(domain: dict, cspec, vtype: str):
         return None
     fields = domain.get("field", domain.get("fields"))
     fields = [fields] if isinstance(fields, str) else fields
-    if vtype in ("linear", "log", "sqrt", "time", "utc"):
-        vals = [row[f] for f in fields for row in rows if row.get(f) is not None]
-        if not vals:
-            return None
-        return [min(vals), max(vals)]
-    # ordinal/nominal/band/point (categorical) -> unique, sorted category list.
-    cats: list = []
-    seen = set()
-    for row in rows:
-        for f in fields:
-            v = row.get(f)
-            if v is not None and v not in seen:
-                seen.add(v)
-                cats.append(v)
-    return sorted(cats)
+    return _domain_from_pairs([(rows, f) for f in fields], vtype)
 
 
 def _resolve_multi_dataset_domain(domain: dict, cspec, vtype: str):
@@ -101,28 +107,8 @@ def _resolve_multi_dataset_domain(domain: dict, cspec, vtype: str):
     refs = domain.get("fields")
     if not isinstance(refs, list) or not refs or not all(isinstance(r, dict) for r in refs):
         return None
-    if vtype in ("linear", "log", "sqrt", "time", "utc"):
-        vals = []
-        for ref in refs:
-            rows = cspec.datasets.get(ref.get("data"))
-            if not rows:
-                continue
-            f = ref.get("field")
-            vals.extend(row[f] for row in rows if row.get(f) is not None)
-        if not vals:
-            return None
-        return [min(vals), max(vals)]
-    cats: list = []
-    seen = set()
-    for ref in refs:
-        rows = cspec.datasets.get(ref.get("data")) or []
-        f = ref.get("field")
-        for row in rows:
-            v = row.get(f)
-            if v is not None and v not in seen:
-                seen.add(v)
-                cats.append(v)
-    return sorted(cats)
+    pairs = [(cspec.datasets.get(ref.get("data")) or [], ref.get("field")) for ref in refs]
+    return _domain_from_pairs(pairs, vtype)
 
 
 def _resolve_bin_domain(domain: dict, cspec) -> list | None:
@@ -153,24 +139,19 @@ def resolve_domain(scale_spec: dict, cspec) -> Any:
         return domain  # literal list domain, pass through
 
     if isinstance(domain, dict):
-        if "signal" in domain:
-            resolved = _resolve_bin_domain(domain, cspec)
-            if resolved is not None:
-                return resolved
-            warnings.warn(f"scale {name!r}: could not resolve signal domain {domain!r}")
-            return None
-        if "data" in domain:
-            resolved = _resolve_data_ref_domain(domain, cspec, vtype)
-            if resolved is not None:
-                return resolved
-            warnings.warn(f"scale {name!r}: could not resolve data-ref domain {domain!r}")
-            return None
-        if "fields" in domain:
-            resolved = _resolve_multi_dataset_domain(domain, cspec, vtype)
-            if resolved is not None:
-                return resolved
-            warnings.warn(f"scale {name!r}: could not resolve multi-dataset domain {domain!r}")
-            return None
+        # Each entry: (key that identifies this domain shape, resolver, label for the warning).
+        _DICT_DOMAIN_RESOLVERS = (
+            ("signal", lambda: _resolve_bin_domain(domain, cspec), "signal"),
+            ("data", lambda: _resolve_data_ref_domain(domain, cspec, vtype), "data-ref"),
+            ("fields", lambda: _resolve_multi_dataset_domain(domain, cspec, vtype), "multi-dataset"),
+        )
+        for key, resolver, label in _DICT_DOMAIN_RESOLVERS:
+            if key in domain:
+                resolved = resolver()
+                if resolved is not None:
+                    return resolved
+                warnings.warn(f"scale {name!r}: could not resolve {label} domain {domain!r}")
+                return None
 
     warnings.warn(f"scale {name!r}: unrecognized domain shape {domain!r}")
     return None

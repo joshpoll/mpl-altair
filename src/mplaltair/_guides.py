@@ -67,8 +67,13 @@ def _place_legend(ax, leg, legend_objs: list) -> None:
     legend_objs.append(leg)
 
 
-def apply_legends(fig, ax, cspec, scales: dict, registry: dict) -> None:
-    """Build legends/colorbars from `cspec.legends` + the mark-drawing registry."""
+def apply_legends(fig, ax, cspec, scales: dict, registry: dict, symbol_style: dict | None = None) -> None:
+    """Build legends/colorbars from `cspec.legends` + the mark-drawing registry.
+
+    `symbol_style` is the swatch style recorded by a symbol mark's size scale
+    (see `_marks.draw_symbol`/`draw_marks`), used to style the size legend's
+    handles in the mark's own style rather than generic filled discs.
+    """
     from matplotlib.cm import ScalarMappable
 
     legend_objs: list = []
@@ -92,10 +97,10 @@ def apply_legends(fig, ax, cspec, scales: dict, registry: dict) -> None:
             handles, labels = [], []
             from ._marks import _px_to_pt_area
 
-            style = registry.get("__symbol_style__", {})
+            style = symbol_style or {}
             for v in (lo, mid, hi):
                 handles.append(ax.scatter(
-                    [], [], s=_px_to_pt_area(mpl_scale.size_for(v)),
+                    [], [], s=_px_to_pt_area(mpl_scale.size_for(v), fig.dpi),
                     facecolor=style.get("facecolor", "gray"),
                     edgecolor=style.get("edgecolor", "none"),
                     linewidths=style.get("linewidth", 0.0),

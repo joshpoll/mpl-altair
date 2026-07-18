@@ -69,9 +69,9 @@ def convert(chart_or_vl_dict, ax=None, style: str | None = "vega-lite"):
         if "y" in scales:
             apply_position_scale(ax, scales["y"], "y")
 
-        registry = draw_marks(ax, cspec, scales)
+        registry, symbol_style = draw_marks(ax, cspec, scales)
         apply_axes(ax, cspec, scales)
-        apply_legends(fig, ax, cspec, scales, registry)
+        apply_legends(fig, ax, cspec, scales, registry, symbol_style)
 
         if not caller_supplied_ax:
             # Vega width/height are the INNER plot rect; grow the figure so
