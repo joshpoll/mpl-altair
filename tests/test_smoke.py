@@ -95,6 +95,57 @@ def test_renderer_returns_png_mimebundle():
     assert decoded[:8] == b"\x89PNG\r\n\x1a\n"
 
 
+def test_axes_box_matches_vega_inner_plot_rect():
+    """Vega width/height describe the INNER plot rect, not the whole figure --
+    after convert() the axes box itself (not the figure) should match those
+    px dims, within a couple percent (constrained-layout chrome can shift
+    slightly between the sizing pass and the final draw)."""
+    from gallery_charts import scatter_plain
+    from mplaltair._compile import compile_chart
+
+    chart = scatter_plain()
+    cspec, _ = compile_chart(chart.to_dict())
+
+    fig = mplaltair.convert(chart)
+    try:
+        ax = fig.axes[0]
+        fig.canvas.draw()
+        bbox = ax.get_window_extent()
+        assert abs(bbox.width - cspec.width) <= 0.02 * cspec.width
+        assert abs(bbox.height - cspec.height) <= 0.02 * cspec.height
+    finally:
+        plt.close(fig)
+
+
+def test_tick_mark_draws_vertical_segments():
+    """mark_tick with x=Q, y=N (value axis x, category axis y) should draw
+    VERTICAL line segments (x0 == x1) at each point, spanning the y band's
+    band_frac in axis units -- not horizontal dashes."""
+    from gallery_charts import tick
+    from mplaltair._compile import compile_chart
+    from mplaltair._scales import build_scales
+
+    chart = tick()
+    cspec, _ = compile_chart(chart.to_dict())
+    scales = build_scales(cspec)
+    expected_extent = scales["y"].band_frac
+
+    fig = mplaltair.convert(chart)
+    try:
+        ax = fig.axes[0]
+        collections = ax.collections
+        assert len(collections) >= 1
+        lc = collections[0]
+        segments = lc.get_segments()
+        assert len(segments) >= 1
+        for seg in segments:
+            (x0, y0), (x1, y1) = seg
+            assert x0 == pytest.approx(x1)
+            assert abs(y1 - y0) == pytest.approx(expected_extent)
+    finally:
+        plt.close(fig)
+
+
 def test_style_none_uses_callers_active_rcparams():
     """style=None must not apply our vega-lite.mplstyle -- bar colors should
     come from whatever prop_cycle is active in the caller's mpl session."""

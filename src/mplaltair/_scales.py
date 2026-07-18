@@ -336,8 +336,10 @@ class MplScale:
         return cmap, norm_cls(vmin=lo, vmax=hi)
 
     # -- size ------------------------------------------------------------
-    def size_for(self, value, dpi: float = 100.0) -> float:
-        """Map a data value to a matplotlib scatter `s` (pt^2), via px^2 range interpolation."""
+    def size_for(self, value) -> float:
+        """Map a data value to a Vega symbol `size` (true area, px^2), via
+        range interpolation. Caller converts px^2 -> mpl scatter `s` (pt^2)
+        with `_px_to_pt_area` (single conversion choke point)."""
         lo, hi = self.domain[0], self.domain[1]
         rng = self.scale_spec.get("range", [4, 361])
         r0, r1 = rng[0], rng[1]
@@ -351,7 +353,7 @@ class MplScale:
             else:
                 v = r0 + t * (r1 - r0)
             px_area = v
-        return px_area / (dpi / 72) ** 2
+        return px_area
 
     # -- generic -----------------------------------------------------------
     def to_data(self, value):

@@ -70,8 +70,10 @@ def apply_legends(fig, ax, cspec, scales: dict, registry: dict) -> None:
             lo, hi = mpl_scale.domain[0], mpl_scale.domain[1]
             mid = (lo + hi) / 2
             handles, labels = [], []
+            from ._marks import _px_to_pt_area
+
             for v in (lo, mid, hi):
-                handles.append(ax.scatter([], [], s=mpl_scale.size_for(v), color="gray"))
+                handles.append(ax.scatter([], [], s=_px_to_pt_area(mpl_scale.size_for(v)), color="gray"))
                 labels.append(f"{v:g}")
             leg = ax.legend(handles, labels, title=title, loc="upper left",
                              bbox_to_anchor=(1.02, 1), frameon=False)

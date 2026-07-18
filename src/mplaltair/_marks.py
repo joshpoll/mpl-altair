@@ -101,8 +101,20 @@ def _resolve_position_with_offset(entry: dict, row: dict, scales: dict):
 
 
 def _px_to_pt_area(px_area: float, dpi: float = 100) -> float:
-    """Vega symbol `size` is area in px^2; mpl scatter `s` is area in pt^2."""
-    return px_area / (dpi / 72) ** 2
+    """Vega symbol `size` is the true area (px^2) of a circular glyph, d3-style
+    (radius = sqrt(size/pi), so diameter = 2*sqrt(size/pi)). mpl scatter `s` is
+    the SQUARE of the marker diameter in points, not the circle's area -- so
+    the conversion needs the extra 4/pi on top of the px->pt unit conversion:
+      s_pt2 = (4/pi) * size_px2 * (72/dpi)^2
+    """
+    import math
+
+    return (4 / math.pi) * px_area * (72 / dpi) ** 2
+
+
+def _px_to_pt_linear(px: float, dpi: float = 100) -> float:
+    """Convert a linear px extent (e.g. stroke width) to points."""
+    return px * 72 / dpi
 
 
 def draw_symbol(ax, mark: dict, cspec, scales: dict, registry: dict, dpi: float = 100.0) -> None:
@@ -131,10 +143,15 @@ def draw_symbol(ax, mark: dict, cspec, scales: dict, registry: dict, dpi: float 
     def sizes_for(grows: list[dict]):
         if size_scale is not None:
             field = size_entry["field"]
-            return [size_scale.size_for(r.get(field), dpi) for r in grows]
+            return [_px_to_pt_area(size_scale.size_for(r.get(field)), dpi) for r in grows]
         if size_entry and "value" in size_entry:
             return _px_to_pt_area(size_entry["value"], dpi)
         return _px_to_pt_area(30, dpi)  # mpl/vega default point area
+
+    # VL's default point stroke is 2px; when a point is stroke-only (no fill,
+    # or fill+stroke both present) the ring thickness should match that, not
+    # mpl's own default linewidth.
+    default_edge_lw = _px_to_pt_linear(2, dpi)
 
     color_scale = fill_scale or stroke_scale
     color_is_fill = fill_scale is not None
@@ -158,9 +175,11 @@ def draw_symbol(ax, mark: dict, cspec, scales: dict, registry: dict, dpi: float 
                 kwargs["c"] = color
                 if stroke_literal is not None:
                     kwargs["edgecolors"] = stroke_literal
+                    kwargs["linewidths"] = default_edge_lw
             else:
                 kwargs["edgecolors"] = color
                 kwargs["c"] = fill_literal if fill_literal is not None else "none"
+                kwargs["linewidths"] = default_edge_lw
             handle = ax.scatter(xs, ys, **kwargs)
             registry.setdefault(color_scale.name, []).append((handle, str(cat)))
     elif color_scale is not None:
@@ -174,7 +193,7 @@ def draw_symbol(ax, mark: dict, cspec, scales: dict, registry: dict, dpi: float 
             ax.scatter(xs, ys, s=s, c=vals, cmap=cmap, norm=norm)
         else:
             edge_colors = [cmap(norm(v)) for v in vals]
-            ax.scatter(xs, ys, s=s, edgecolors=edge_colors,
+            ax.scatter(xs, ys, s=s, edgecolors=edge_colors, linewidths=default_edge_lw,
                        c=fill_literal if fill_literal is not None else "none")
         # No per-point legend handles for a continuous scale; _guides builds a
         # colorbar directly from the scale (looked up by name), not the registry.
@@ -182,7 +201,8 @@ def draw_symbol(ax, mark: dict, cspec, scales: dict, registry: dict, dpi: float 
         xs = [resolve_channel(x_entry, r, scales) for r in rows]
         ys = [resolve_channel(y_entry, r, scales) for r in rows]
         s = sizes_for(rows)
-        ax.scatter(xs, ys, s=s, c=fill_literal, edgecolors=stroke_literal)
+        lw = default_edge_lw if stroke_literal is not None else None
+        ax.scatter(xs, ys, s=s, c=fill_literal, edgecolors=stroke_literal, linewidths=lw)
 
 
 def draw_line(ax, mark: dict, facet: dict | None, cspec, scales: dict, registry: dict) -> None:
@@ -341,35 +361,66 @@ def _detect_tick(update: dict) -> bool:
     return False
 
 
-def _draw_tick(ax, rows: list[dict], update: dict, scales: dict, x_scale, y_scale) -> None:
-    """Thin-extent rect (mark_tick): approximate as short line segments (fixed half-width).
+def _draw_tick(ax, rows: list[dict], update: dict, scales: dict, x_scale, y_scale, dpi: float = 100.0) -> None:
+    """Thin-extent rect (mark_tick): draw as short line segments.
 
-    Simplification per plan: uses a fixed 0.35-axis-unit half-length along the
-    band axis rather than converting the actual px thickness/bandwidth.
+    Orientation comes from the encode shape, not a fixed axis guess: an `xc`
+    entry paired with a thin literal `width` means the value axis is x and
+    the tick is a VERTICAL stroke at x=xc spanning the category band on y
+    (mirror: `yc` + thin `height` -> horizontal stroke spanning the x band).
+    The band's half-length uses that band scale's `band_frac` (not a fixed
+    constant), so tick length matches the actual bandwidth; the stroke's
+    thickness is the encode's thin px value converted to pt.
     """
     from matplotlib.collections import LineCollection
 
-    x_entry = update.get("x") or update.get("xc")
-    y_entry = update.get("y") or update.get("yc")
-    half = 0.35
-    x_band = x_scale is not None and x_scale.vtype in ("band", "point")
-    y_band = y_scale is not None and y_scale.vtype in ("band", "point")
+    xc_entry = update.get("xc")
+    yc_entry = update.get("yc")
+    x_entry = update.get("x")
+    y_entry = update.get("y")
+    width_entry = update.get("width")
+    height_entry = update.get("height")
+
+    def _is_thin(entry):
+        return bool(entry) and "value" in entry and "field" not in entry and entry["value"] <= 6
 
     segments = []
-    for r in rows:
-        xv = resolve_channel(x_entry, r, scales) if x_entry else None
-        yv = resolve_channel(y_entry, r, scales) if y_entry else None
-        if x_band and not y_band:
+    if xc_entry is not None and _is_thin(width_entry):
+        # Value axis is x; category axis is y -- vertical strokes.
+        cat_entry = y_entry or yc_entry
+        band_frac = y_scale.band_frac if y_scale is not None else 0.7
+        half = band_frac / 2
+        for r in rows:
+            xv = resolve_channel(xc_entry, r, scales)
+            yv = resolve_channel(cat_entry, r, scales)
             segments.append([(xv, yv - half), (xv, yv + half)])
-        elif y_band and not x_band:
+        thickness_px = width_entry["value"]
+    elif yc_entry is not None and _is_thin(height_entry):
+        # Value axis is y; category axis is x -- horizontal strokes.
+        cat_entry = x_entry or xc_entry
+        band_frac = x_scale.band_frac if x_scale is not None else 0.7
+        half = band_frac / 2
+        for r in rows:
+            yv = resolve_channel(yc_entry, r, scales)
+            xv = resolve_channel(cat_entry, r, scales)
             segments.append([(xv - half, yv), (xv + half, yv)])
-        else:
+        thickness_px = height_entry["value"]
+    else:
+        # Fallback: neither shape matched (unexpected encode) -- best-effort
+        # single-point segments so drawing doesn't crash.
+        x_entry_fb = x_entry or xc_entry
+        y_entry_fb = y_entry or yc_entry
+        for r in rows:
+            xv = resolve_channel(x_entry_fb, r, scales) if x_entry_fb else None
+            yv = resolve_channel(y_entry_fb, r, scales) if y_entry_fb else None
             segments.append([(xv, yv), (xv, yv)])
+        thickness_px = 1
 
     fill_entry = update.get("fill") or update.get("stroke")
     color = fill_entry.get("value") if fill_entry and "value" in fill_entry else None
     color = _resolve_color_literal(color)
-    ax.add_collection(LineCollection(segments, colors=color or "C0", linewidths=1.5))
+    linewidth = _px_to_pt_linear(thickness_px, dpi)
+    ax.add_collection(LineCollection(segments, colors=color or "C0", linewidths=linewidth))
     ax.autoscale_view()
 
 

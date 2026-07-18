@@ -7,7 +7,7 @@ import warnings
 
 from ._compile import compile_chart
 from ._guides import apply_axes, apply_legends
-from ._layout import make_figure
+from ._layout import finalize_figure_size, make_figure, target_axes_px
 from ._marks import draw_marks
 from ._scales import apply_position_scale, build_scales
 
@@ -58,6 +58,8 @@ def convert(chart_or_vl_dict, ax=None, style: str | None = "vega-lite"):
     for w in vf_warnings:
         warnings.warn(f"vegafusion: {w}")
 
+    caller_supplied_ax = ax is not None
+
     with _style_context(style):
         scales = build_scales(cspec)
         fig, ax = make_figure(cspec, scales=scales, ax=ax)
@@ -70,6 +72,14 @@ def convert(chart_or_vl_dict, ax=None, style: str | None = "vega-lite"):
         registry = draw_marks(ax, cspec, scales)
         apply_axes(ax, cspec)
         apply_legends(fig, ax, cspec, scales, registry)
+
+        if not caller_supplied_ax:
+            # Vega width/height are the INNER plot rect; grow the figure so
+            # the axes box itself (not the whole figure) matches that target
+            # -- see `finalize_figure_size`. When the caller supplied `ax`,
+            # they own layout and we leave sizing alone.
+            target_w_px, target_h_px = target_axes_px(cspec, scales)
+            finalize_figure_size(fig, ax, target_w_px, target_h_px)
 
     return fig
 
