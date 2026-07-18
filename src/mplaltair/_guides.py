@@ -35,6 +35,19 @@ def apply_axes(ax, cspec) -> None:
             axis_obj.tick_right()
 
 
+def unclip_gridlines(ax) -> None:
+    """Unclip gridlines so the ones at the axes limits always render.
+
+    A gridline at a domain edge sits exactly on the axes clip boundary, and
+    whether its 1px stroke survives rasterization is pixel-alignment luck
+    (e.g. the x-max gridline vanishing while the y-max one renders). Vega
+    always draws boundary gridlines. Gridlines only ever span the axes rect,
+    so unclipping cannot bleed anywhere else.
+    """
+    for tick in (*ax.xaxis.get_major_ticks(), *ax.yaxis.get_major_ticks()):
+        tick.gridline.set_clip_on(False)
+
+
 def _place_legend(ax, leg, legend_objs: list) -> None:
     """Track a newly-created legend; keep any earlier legend visible.
 
@@ -72,8 +85,14 @@ def apply_legends(fig, ax, cspec, scales: dict, registry: dict) -> None:
             handles, labels = [], []
             from ._marks import _px_to_pt_area
 
+            style = registry.get("__symbol_style__", {})
             for v in (lo, mid, hi):
-                handles.append(ax.scatter([], [], s=_px_to_pt_area(mpl_scale.size_for(v)), color="gray"))
+                handles.append(ax.scatter(
+                    [], [], s=_px_to_pt_area(mpl_scale.size_for(v)),
+                    facecolor=style.get("facecolor", "gray"),
+                    edgecolor=style.get("edgecolor", "none"),
+                    linewidths=style.get("linewidth", 0.0),
+                ))
                 labels.append(f"{v:g}")
             leg = ax.legend(handles, labels, title=title, loc="upper left",
                              bbox_to_anchor=(1.02, 1), frameon=False)

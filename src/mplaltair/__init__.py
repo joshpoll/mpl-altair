@@ -6,7 +6,7 @@ import os
 import warnings
 
 from ._compile import compile_chart
-from ._guides import apply_axes, apply_legends
+from ._guides import apply_axes, apply_legends, unclip_gridlines
 from ._layout import finalize_figure_size, make_figure, target_axes_px
 from ._marks import draw_marks
 from ._scales import apply_position_scale, build_scales
@@ -72,6 +72,7 @@ def convert(chart_or_vl_dict, ax=None, style: str | None = "vega-lite"):
         registry = draw_marks(ax, cspec, scales)
         apply_axes(ax, cspec)
         apply_legends(fig, ax, cspec, scales, registry)
+        unclip_gridlines(ax)
 
         if not caller_supplied_ax:
             # Vega width/height are the INNER plot rect; grow the figure so

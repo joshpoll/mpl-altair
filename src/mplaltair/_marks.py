@@ -153,6 +153,16 @@ def draw_symbol(ax, mark: dict, cspec, scales: dict, registry: dict, dpi: float 
     # mpl's own default linewidth.
     default_edge_lw = _px_to_pt_linear(2, dpi)
 
+    if size_scale is not None:
+        # VL renders size-legend swatches in the mark's own style (e.g. hollow
+        # stroke-only rings), not generic filled discs; record it for _guides.
+        registry["__symbol_style__"] = {
+            "facecolor": fill_literal if fill_literal is not None else "none",
+            "edgecolor": stroke_literal if stroke_literal is not None
+                         else (fill_literal if fill_literal not in (None, "none") else "C0"),
+            "linewidth": default_edge_lw if stroke_literal is not None or fill_literal in (None, "none") else 0.0,
+        }
+
     color_scale = fill_scale or stroke_scale
     color_is_fill = fill_scale is not None
     color_field = (fill_entry if color_is_fill else stroke_entry)["field"] if color_scale is not None else None
