@@ -565,6 +565,9 @@ def draw_rect(ax, mark: dict, cspec, scales: dict, registry: dict) -> None:
 def draw_marks(ax, cspec, scales: dict) -> dict:
     """Draw all drawable marks; returns a legend-handle registry {scale_name: [(handle, label)]}."""
     registry: dict[str, list] = {}
+    # Vega does not clip marks to the plot rect unless the spec asks for it,
+    # so marks at a domain edge (e.g. a tick at xlim) must render fully.
+    pre_existing = {id(a) for a in (*ax.lines, *ax.collections, *ax.patches)}
     for mark, facet in walk_drawable_marks(cspec.marks):
         mtype = mark.get("type")
         if mtype == "symbol":
@@ -579,4 +582,7 @@ def draw_marks(ax, cspec, scales: dict) -> dict:
             draw_rule(ax, mark, cspec, scales, registry)
         else:
             warnings.warn(f"mark type {mtype!r} not yet supported; skipping")
+    for artist in (*ax.lines, *ax.collections, *ax.patches):
+        if id(artist) not in pre_existing:
+            artist.set_clip_on(False)
     return registry
