@@ -90,18 +90,11 @@ chart  # displays as a matplotlib PNG instead of the default Vega-Lite renderer
 
 ## Not supported (prototype scope)
 
-- Faceting and `concat`/`hconcat`/`vconcat`.
 - `geoshape`, `text`, and `arc` marks.
-- Interactivity (selections, tooltips, pan/zoom).
 - Independently-resolved dual-axis charts (`resolve_scale(y="independent")`) -- not handled; each scale/mark is walked independently with no special detection, so results are undefined rather than validated or rejected.
 - Exact tick-format fidelity to Vega-Lite's `d3-format` strings (best-effort translation of trivial cases; mpl's own default formatting otherwise).
-- `width: "container"` / other signal-driven, non-numeric dimensions.
 
-Unsupported or unrecognized spec shapes raise a warning and skip the offending piece rather than silently guessing or crashing the whole render.
-
-## Known issues
-
-- **Boundary gridlines can still fail to render.** Gridlines at the axes limits sit exactly on the axes edge; despite unclipping them (`_guides.unclip_gridlines`, applied after the figure-resize pass), some charts still visibly miss the top/right-edge gridline that Vega-Lite always draws. The pixel-level regression test finds gridline-intensity pixels at the boundary, so what survives may be a faint sub-pixel remnant rather than a full-strength line. Root cause not fully run to ground; needs a deeper look at how mpl rasterizes 1px lines at the axes boundary (and whether tick objects get recreated with clipping after later draws, e.g. `bbox_inches='tight'` re-layout).
+Unsupported or unrecognized spec shapes raise a warning and skip the offending piece rather than silently guessing or crashing the whole render. Larger missing pieces and known rendering issues are tracked on the [issue tracker](https://github.com/joshpoll/mpl-altair/issues): faceting and `concat` ([#1](https://github.com/joshpoll/mpl-altair/issues/1)), interactivity and reactive signals ([#2](https://github.com/joshpoll/mpl-altair/issues/2)), and boundary gridline rendering ([#3](https://github.com/joshpoll/mpl-altair/issues/3)).
 
 ## Gallery
 
