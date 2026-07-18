@@ -85,6 +85,10 @@ chart  # displays as a matplotlib PNG instead of the default Vega-Lite renderer
 
 Unsupported or unrecognized spec shapes raise a warning and skip the offending piece rather than silently guessing or crashing the whole render.
 
+## Known issues
+
+- **Boundary gridlines can still fail to render.** Gridlines at the axes limits sit exactly on the axes edge; despite unclipping them (`_guides.unclip_gridlines`, applied after the figure-resize pass), some charts still visibly miss the top/right-edge gridline that Vega-Lite always draws. The pixel-level regression test finds gridline-intensity pixels at the boundary, so what survives may be a faint sub-pixel remnant rather than a full-strength line. Root cause not fully run to ground; needs a deeper look at how mpl rasterizes 1px lines at the axes boundary (and whether tick objects get recreated with clipping after later draws, e.g. `bbox_inches='tight'` re-layout).
+
 ## Gallery
 
 `scripts/gallery.py` renders about a dozen representative charts through both mpl-altair and the reference `vl-convert` PNG renderer, side by side, into `scripts/out/gallery.html`, plus one extra row showing a chart re-themed with `style="dark_background"`. Run it and open the HTML file in a browser:
