@@ -10,7 +10,7 @@ from __future__ import annotations
 _ORIENT_TO_AXIS = {"bottom": "x", "top": "x", "left": "y", "right": "y"}
 
 
-def apply_axes(ax, cspec) -> None:
+def apply_axes(ax, cspec, scales: dict | None = None) -> None:
     for axis_entry in cspec.axes:
         orient = axis_entry.get("orient")
         which = _ORIENT_TO_AXIS.get(orient)
@@ -25,7 +25,13 @@ def apply_axes(ax, cspec) -> None:
             else:
                 ax.set_ylabel(title)
 
-        ax.grid(bool(axis_entry.get("grid")), axis=which)
+        grid_on = bool(axis_entry.get("grid"))
+        ax.grid(grid_on, axis=which)
+        # Vega draws log-axis gridlines at every tick (2..9 per decade), not
+        # just the decades -- mirror that with mpl's minor gridlines.
+        mpl_scale = (scales or {}).get(axis_entry.get("scale"))
+        if mpl_scale is not None and mpl_scale.vtype == "log":
+            ax.grid(grid_on, axis=which, which="minor")
 
         if orient == "top":
             axis_obj.set_label_position("top")
@@ -44,7 +50,8 @@ def unclip_gridlines(ax) -> None:
     always draws boundary gridlines. Gridlines only ever span the axes rect,
     so unclipping cannot bleed anywhere else.
     """
-    for tick in (*ax.xaxis.get_major_ticks(), *ax.yaxis.get_major_ticks()):
+    for tick in (*ax.xaxis.get_major_ticks(), *ax.yaxis.get_major_ticks(),
+                 *ax.xaxis.get_minor_ticks(), *ax.yaxis.get_minor_ticks()):
         tick.gridline.set_clip_on(False)
 
 

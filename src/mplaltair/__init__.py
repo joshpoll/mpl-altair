@@ -70,7 +70,7 @@ def convert(chart_or_vl_dict, ax=None, style: str | None = "vega-lite"):
             apply_position_scale(ax, scales["y"], "y")
 
         registry = draw_marks(ax, cspec, scales)
-        apply_axes(ax, cspec)
+        apply_axes(ax, cspec, scales)
         apply_legends(fig, ax, cspec, scales, registry)
         unclip_gridlines(ax)
 
