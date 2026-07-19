@@ -71,6 +71,17 @@ def target_axes_px(cspec, scales: dict | None = None) -> tuple[float, float]:
     return w, h
 
 
+def _px_to_figsize(w_px: float, h_px: float) -> tuple[float, float]:
+    """Convert a target px size to a `figsize=` (inches), floored at
+    `_MIN_INCH` so labels/legends have room instead of clipping. Shared by
+    `make_figure` and `make_facet_figure` -- both just pick a starting
+    figsize equal to (a multiple of) the target px as a reasonable initial
+    guess; the real convergence to the target happens later in
+    `finalize_figure_size`, once marks/guides are drawn and constrained
+    layout knows how much chrome it needs."""
+    return max(w_px / _DPI, _MIN_INCH), max(h_px / _DPI, _MIN_INCH)
+
+
 def make_figure(cspec, scales: dict | None = None, ax=None, axes_px: tuple[float, float] | None = None):
     """Create (or reuse) a Figure/Axes sized from the spec's plot dims.
 
@@ -89,17 +100,35 @@ def make_figure(cspec, scales: dict | None = None, ax=None, axes_px: tuple[float
     import matplotlib.pyplot as plt
 
     w, h = axes_px if axes_px is not None else target_axes_px(cspec, scales)
-    fig_w, fig_h = w / _DPI, h / _DPI
-    fig_w = max(fig_w, _MIN_INCH)
-    fig_h = max(fig_h, _MIN_INCH)
+    figsize = _px_to_figsize(w, h)
 
     if ax is None:
-        fig, ax = plt.subplots(
-            figsize=(fig_w, fig_h), dpi=_DPI, layout="constrained"
-        )
+        fig, ax = plt.subplots(figsize=figsize, dpi=_DPI, layout="constrained")
     else:
         fig = ax.figure
     return fig, ax
+
+
+def make_facet_figure(nrows: int, ncols: int, axes_px: tuple[float, float]):
+    """Create a `nrows` x `ncols` grid of shared-scale Axes sized from the
+    per-panel target px (the same `target_axes_px` single-view figures use --
+    shared scales mean every panel targets the same size). Returns (fig,
+    axes) with `axes` a 2D array (`squeeze=False`), even for a 1xN/Nx1 grid.
+
+    Mirrors `make_figure`: this picks a reasonable starting figsize (an
+    initial guess), and `finalize_figure_size` (called once on a
+    representative panel Axes) does the real convergence once the grid's
+    chrome -- headers, a shared legend -- has been drawn.
+    """
+    import matplotlib.pyplot as plt
+
+    w, h = axes_px
+    figsize = _px_to_figsize(ncols * w, nrows * h)
+    fig, axes = plt.subplots(
+        nrows, ncols, figsize=figsize, dpi=_DPI,
+        layout="constrained", sharex=True, sharey=True, squeeze=False,
+    )
+    return fig, axes
 
 
 def finalize_figure_size(fig, ax, target_w_px: float, target_h_px: float, iterations: int = 2) -> None:

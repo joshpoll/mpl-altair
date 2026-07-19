@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from gallery_charts import CHARTS, ROW_COUNTS  # noqa: E402
+from gallery_charts import CHARTS, FACET_PANEL_COUNTS, ROW_COUNTS  # noqa: E402
 
 import mplaltair  # noqa: E402
 
@@ -28,7 +28,22 @@ def test_gallery_chart_converts(name, builder, kind):
         ax = fig.axes[0]
         assert len(fig.axes) >= 1
 
-        if kind == "bar":
+        if kind == "facet":
+            n_panels, n_visible = FACET_PANEL_COUNTS[name]
+            assert len(fig.axes) == n_panels
+            visible_axes = [a for a in fig.axes if a.get_visible()]
+            assert len(visible_axes) == n_visible
+            for panel_ax in visible_axes:
+                n_artists = len(panel_ax.patches) + len(panel_ax.collections)
+                assert n_artists >= 1, "panel drew no marks"
+            # Shared scales: every visible panel has identical x/y limits.
+            xlims = {panel_ax.get_xlim() for panel_ax in visible_axes}
+            ylims = {panel_ax.get_ylim() for panel_ax in visible_axes}
+            assert len(xlims) == 1
+            assert len(ylims) == 1
+            if name == "facet_color_legend":
+                assert fig.legends, "expected a figure-level legend"
+        elif kind == "bar":
             assert len(ax.patches) == ROW_COUNTS[name]
         elif kind == "bar_legend":
             assert len(ax.patches) == ROW_COUNTS[name]
@@ -113,6 +128,47 @@ def test_axes_box_matches_vega_inner_plot_rect():
         bbox = ax.get_window_extent()
         assert abs(bbox.width - cspec.width) <= 0.02 * cspec.width
         assert abs(bbox.height - cspec.height) <= 0.02 * cspec.height
+    finally:
+        plt.close(fig)
+
+
+def test_facet_panel_size_matches_target():
+    """Each panel's axes box should match the per-panel target px size (the
+    same target every panel shares, since only shared-scale facets are
+    supported) -- the multi-Axes analog of
+    `test_axes_box_matches_vega_inner_plot_rect`."""
+    from gallery_charts import facet_column
+    from mplaltair._compile import compile_chart
+    from mplaltair._layout import target_axes_px
+    from mplaltair._scales import build_scales
+
+    chart = facet_column()
+    cspec, _ = compile_chart(chart.to_dict())
+    scales = build_scales(cspec)
+    target_w, target_h = target_axes_px(cspec, scales)
+
+    fig = mplaltair.convert(chart)
+    try:
+        fig.canvas.draw()
+        for ax in fig.axes:
+            if not ax.get_visible():
+                continue
+            bbox = ax.get_window_extent()
+            assert abs(bbox.width - target_w) <= 0.02 * target_w
+            assert abs(bbox.height - target_h) <= 0.02 * target_h
+    finally:
+        plt.close(fig)
+
+
+def test_convert_with_ax_raises_for_faceted_chart():
+    """A faceted chart needs the whole figure -- convert(chart, ax=...) must
+    refuse rather than silently drawing into just one panel."""
+    from gallery_charts import facet_column
+
+    fig, ax = plt.subplots()
+    try:
+        with pytest.raises(ValueError):
+            mplaltair.convert(facet_column(), ax=ax)
     finally:
         plt.close(fig)
 

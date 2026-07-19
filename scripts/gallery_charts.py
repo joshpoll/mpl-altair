@@ -45,6 +45,16 @@ _area_df = pd.DataFrame({
     "val": [3, 5, 2, 1, 2, 4],
 })
 _rule_df = pd.DataFrame({"y": [4.0]})
+_facet_df = pd.DataFrame({
+    "cat": ["a", "a", "b", "b", "c", "c"],
+    "grp": ["x", "y", "x", "y", "x", "y"],
+    "val": [3, 5, 2, 7, 4, 1],
+})
+_facet_wrap_df = pd.DataFrame({
+    "wrap": ["p", "p", "q", "q", "r", "r", "s", "s", "t", "t"],
+    "grp": ["x", "y"] * 5,
+    "val": [3, 5, 2, 7, 4, 1, 6, 2, 9, 3],
+})
 
 
 def bar_simple():
@@ -117,6 +127,23 @@ def layered_line_point():
     return base.mark_line() + base.mark_point()
 
 
+def facet_column():
+    return alt.Chart(_facet_df).mark_point().encode(x="val:Q", y="grp:N", column="cat:N")
+
+
+def facet_row():
+    return alt.Chart(_facet_df).mark_bar().encode(x="grp:N", y="val:Q", row="cat:N")
+
+
+def facet_wrap():
+    # 5 distinct "wrap" values, columns=3 -> a ragged last row (3 + 2).
+    return alt.Chart(_facet_wrap_df).mark_point().encode(x="val:Q", y="grp:N").facet("wrap:N", columns=3)
+
+
+def facet_color_legend():
+    return alt.Chart(_facet_df).mark_point().encode(x="val:Q", y="grp:N", color="grp:N", column="cat:N")
+
+
 # (name, builder, kind) -- kind drives the smoke tests' per-type assertions.
 CHARTS = [
     ("bar_simple", bar_simple, "bar"),
@@ -135,6 +162,10 @@ CHARTS = [
     ("tick", tick, "tick"),
     ("rule", rule, "rule"),
     ("layered_line_point", layered_line_point, "layered"),
+    ("facet_column", facet_column, "facet"),
+    ("facet_row", facet_row, "facet"),
+    ("facet_wrap", facet_wrap, "facet"),
+    ("facet_color_legend", facet_color_legend, "facet"),
 ]
 
 # Underlying-data row counts for exact bar/patch-count smoke assertions.
@@ -143,4 +174,13 @@ ROW_COUNTS = {
     "bar_horizontal": len(_simple_df),
     "bar_stacked": len(_stack_df),
     "bar_grouped": len(_stack_df),
+}
+
+# (n_panels, n_visible_panels) for facet smoke assertions -- n_panels ==
+# len(fig.axes) includes any hidden trailing slot in a ragged wrapped grid.
+FACET_PANEL_COUNTS = {
+    "facet_column": (3, 3),
+    "facet_row": (3, 3),
+    "facet_wrap": (6, 5),  # 5 wrap values, columns=3 -> a ragged 3+2 grid
+    "facet_color_legend": (3, 3),
 }

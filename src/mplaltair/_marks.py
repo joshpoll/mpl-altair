@@ -11,6 +11,8 @@ import matplotlib as mpl
 import numpy as np
 import pandas as pd
 
+from ._compile import is_concat_group
+
 
 # Vega-Lite's compiled-in default mark color/point-stroke -- a literal hex,
 # not a scale-resolved value, so it never passes through an MplScale. Single
@@ -211,11 +213,6 @@ def _px_to_pt_area(px_area: float, dpi: float) -> float:
 def _px_to_pt_linear(px: float, dpi: float) -> float:
     """Convert a linear px extent (e.g. stroke width) to points."""
     return px * 72 / dpi
-
-
-def _warn_if_faceted(facet: dict | None, mtype: str) -> None:
-    if facet is not None:
-        warnings.warn(f"faceted {mtype!r} mark not supported; drawing unfaceted")
 
 
 def draw_symbol(ax, mark: dict, cspec, scales: dict, registry: dict, dpi: float) -> dict | None:
@@ -684,7 +681,6 @@ def draw_marks(ax, cspec, scales: dict, axes_px: tuple[float, float]) -> MarkDra
     for mark, facet in walk_drawable_marks(cspec.marks):
         mtype = mark.get("type")
         if mtype == "symbol":
-            _warn_if_faceted(facet, mtype)
             style = draw_symbol(ax, mark, cspec, scales, registry, dpi)
             if style is not None:
                 symbol_style = style
@@ -693,11 +689,11 @@ def draw_marks(ax, cspec, scales: dict, axes_px: tuple[float, float]) -> MarkDra
         elif mtype == "area":
             draw_area(ax, mark, facet, cspec, scales, registry)
         elif mtype == "rect":
-            _warn_if_faceted(facet, mtype)
             draw_rect(ax, mark, cspec, scales, registry, dpi, axes_px)
         elif mtype == "rule":
-            _warn_if_faceted(facet, mtype)
             draw_rule(ax, mark, cspec, scales, registry)
+        elif mtype == "group" and is_concat_group(mark):
+            warnings.warn("concat charts not yet supported; skipping")
         else:
             warnings.warn(f"mark type {mtype!r} not yet supported; skipping")
     for artist in (*ax.lines, *ax.collections, *ax.patches):
