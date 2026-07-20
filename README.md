@@ -16,32 +16,6 @@ Because the output is a real matplotlib figure, any matplotlib style restyles th
 
 <img src="docs/images/bar_stacked_dark_ours.png" height="260">
 
-## How it works
-
-Altair charts are specified in Vega-Lite, a high-level grammar of graphics. mpl-altair does not reimplement Vega-Lite's semantics. Instead it reuses the real Vega-Lite compiler and the real Vega dataflow engine to do all the hard work, and only translates the fully resolved result into matplotlib calls:
-
-```
-Altair chart (chart.to_dict())
-  -> vl-convert: Vega-Lite spec -> Vega spec       (compiles all VL semantics/defaults)
-  -> vegafusion: pre_transform_spec()               (evaluates transforms, inlines data)
-  -> mpl-altair: reads the resolved scales/marks/axes/legends
-  -> matplotlib calls, in data coordinates          (mpl owns axes, ticks, legends, layout)
-```
-
-This is why mpl-altair can support most standard Altair chart types without reimplementing Vega-Lite's scale, stacking, and binning logic from scratch: by the time mpl-altair sees the spec, vl-convert and vegafusion have already resolved it down to concrete rows, scale domains, and per-mark encodings. mpl-altair's job is just to walk that resolved structure and call the matching matplotlib function (`ax.bar`, `ax.scatter`, `ax.plot`, and so on).
-
-## Philosophy
-
-**matplotlib owns the axes, ticks, legends, and styling. mpl-altair does not chase pixel-for-pixel fidelity with Vega-Lite's own renderer.**
-
-Concretely:
-
-- Positions and data extents come from Vega-Lite's resolved scale domains, but tick placement, tick formatting, gridlines, and legend layout are matplotlib's own (`AutoLocator`, `ConciseDateFormatter`, `ax.legend`, `fig.colorbar`, and so on).
-- Colors follow matplotlib style, not Vega-Lite's rendering. A categorical color scale pulls from the active mpl `prop_cycle`; a continuous color scale pulls from `rcParams['image.cmap']`; Vega-Lite's compiled-in default mark color resolves to mpl's `'C0'` so a plain, uncolored bar or point chart also restyles with the active mpl style.
-- The goal is a **semantic match**: same data extents, same categories, same stacking order, same legend content, same colors-per-series. Not a pixel match against Vega-Lite's SVG/canvas renderer.
-
-If you want the classic Vega-Lite look, that's the default (`mplaltair` ships a `vega-lite` mpl style sheet, applied automatically). If you want your own house style, pass any matplotlib style name or your own style sheet, or use `style=None` to inherit whatever mpl style is already active in your session.
-
 ## Quickstart
 
 ```python
@@ -78,6 +52,32 @@ mplaltair.enable()
 
 chart  # displays as a matplotlib PNG instead of the default Vega-Lite renderer
 ```
+
+## How it works
+
+Altair charts are specified in Vega-Lite, a high-level grammar of graphics. mpl-altair does not reimplement Vega-Lite's semantics. Instead it reuses the real Vega-Lite compiler and the real Vega dataflow engine to do all the hard work, and only translates the fully resolved result into matplotlib calls:
+
+```
+Altair chart (chart.to_dict())
+  -> vl-convert: Vega-Lite spec -> Vega spec       (compiles all VL semantics/defaults)
+  -> vegafusion: pre_transform_spec()               (evaluates transforms, inlines data)
+  -> mpl-altair: reads the resolved scales/marks/axes/legends
+  -> matplotlib calls, in data coordinates          (mpl owns axes, ticks, legends, layout)
+```
+
+This is why mpl-altair can support most standard Altair chart types without reimplementing Vega-Lite's scale, stacking, and binning logic from scratch: by the time mpl-altair sees the spec, vl-convert and vegafusion have already resolved it down to concrete rows, scale domains, and per-mark encodings. mpl-altair's job is just to walk that resolved structure and call the matching matplotlib function (`ax.bar`, `ax.scatter`, `ax.plot`, and so on).
+
+## Philosophy
+
+**matplotlib owns the axes, ticks, legends, and styling. mpl-altair does not chase pixel-for-pixel fidelity with Vega-Lite's own renderer.**
+
+Concretely:
+
+- Positions and data extents come from Vega-Lite's resolved scale domains, but tick placement, tick formatting, gridlines, and legend layout are matplotlib's own (`AutoLocator`, `ConciseDateFormatter`, `ax.legend`, `fig.colorbar`, and so on).
+- Colors follow matplotlib style, not Vega-Lite's rendering. A categorical color scale pulls from the active mpl `prop_cycle`; a continuous color scale pulls from `rcParams['image.cmap']`; Vega-Lite's compiled-in default mark color resolves to mpl's `'C0'` so a plain, uncolored bar or point chart also restyles with the active mpl style.
+- The goal is a **semantic match**: same data extents, same categories, same stacking order, same legend content, same colors-per-series. Not a pixel match against Vega-Lite's SVG/canvas renderer.
+
+If you want the classic Vega-Lite look, that's the default (`mplaltair` ships a `vega-lite` mpl style sheet, applied automatically). If you want your own house style, pass any matplotlib style name or your own style sheet, or use `style=None` to inherit whatever mpl style is already active in your session.
 
 ## Supported
 
