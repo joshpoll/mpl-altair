@@ -346,31 +346,57 @@ class MplScale:
         return value
 
 
+def _scale_from_resolved_domain(name: str, spec: dict, domain: Any) -> MplScale:
+    """Build an `MplScale` from an already-resolved domain -- the tail half
+    of `build_scales`'s per-scale body (zero/nice, temporal coercion,
+    categories/padding), factored out so a facet's independent-scale-
+    resolution path can reuse it too: that path's domain comes straight
+    from one panel's own filtered rows (see `build_panel_scale`) rather than
+    `resolve_domain`'s dataset-name lookup, but everything downstream of
+    "here is a domain" is identical.
+    """
+    vtype = spec.get("type", "linear")
+    if vtype in ("linear", "log", "sqrt", "time", "utc"):
+        domain = _apply_zero_nice(domain, spec)
+    if vtype in ("time", "utc") and isinstance(domain, list):
+        domain = list(coerce_temporal(domain))
+
+    categories = None
+    paddingInner = paddingOuter = 0.0
+    if vtype in ("band", "point"):
+        categories = domain if isinstance(domain, list) else []
+        paddingInner, paddingOuter = _band_paddings(vtype, spec)
+    elif vtype in ("ordinal", "nominal"):
+        # Categorical scales (color, shape, ...) resolve a domain the same
+        # way band scales do; expose it as `categories` for color_for().
+        categories = domain if isinstance(domain, list) else []
+
+    return MplScale(
+        name=name, vtype=vtype, domain=domain, scale_spec=spec,
+        categories=categories, paddingInner=paddingInner, paddingOuter=paddingOuter,
+    )
+
+
 def build_scales(cspec) -> dict[str, MplScale]:
-    scales: dict[str, MplScale] = {}
-    for name, spec in cspec.scales.items():
-        vtype = spec.get("type", "linear")
-        domain = resolve_domain(spec, cspec)
-        if vtype in ("linear", "log", "sqrt", "time", "utc"):
-            domain = _apply_zero_nice(domain, spec)
-        if vtype in ("time", "utc") and isinstance(domain, list):
-            domain = list(coerce_temporal(domain))
+    return {
+        name: _scale_from_resolved_domain(name, spec, resolve_domain(spec, cspec))
+        for name, spec in cspec.scales.items()
+    }
 
-        categories = None
-        paddingInner = paddingOuter = 0.0
-        if vtype in ("band", "point"):
-            categories = domain if isinstance(domain, list) else []
-            paddingInner, paddingOuter = _band_paddings(vtype, spec)
-        elif vtype in ("ordinal", "nominal"):
-            # Categorical scales (color, shape, ...) resolve a domain the same
-            # way band scales do; expose it as `categories` for color_for().
-            categories = domain if isinstance(domain, list) else []
 
-        scales[name] = MplScale(
-            name=name, vtype=vtype, domain=domain, scale_spec=spec,
-            categories=categories, paddingInner=paddingInner, paddingOuter=paddingOuter,
-        )
-    return scales
+def build_panel_scale(name: str, spec: dict, rows: list[dict], field: str) -> MplScale:
+    """Build a per-panel `MplScale` for a facet's independently-resolved axis:
+    the domain comes straight from this panel's own (already-filtered) rows
+    instead of a named dataset -- vegafusion never inlines a per-facet-value
+    domain-summary dataset (it's a per-cell computation only Vega's own
+    group-cloning runtime would evaluate, after our pipeline already ran),
+    so `resolve_domain`'s dataset-lookup machinery doesn't apply here.
+    Reuses the same `_domain_from_pairs` a data-ref domain resolves
+    through, just fed this panel's rows directly.
+    """
+    vtype = spec.get("type", "linear")
+    domain = _domain_from_pairs([(rows, field)], vtype)
+    return _scale_from_resolved_domain(name, spec, domain)
 
 
 def apply_position_scale(ax, mpl_scale: MplScale, axis: str) -> None:

@@ -213,11 +213,6 @@ def _px_to_pt_linear(px: float, dpi: float) -> float:
     return px * 72 / dpi
 
 
-def _warn_if_faceted(facet: dict | None, mtype: str) -> None:
-    if facet is not None:
-        warnings.warn(f"faceted {mtype!r} mark not supported; drawing unfaceted")
-
-
 def draw_symbol(ax, mark: dict, cspec, scales: dict, registry: dict, dpi: float) -> dict | None:
     """Draw a symbol (point/scatter) mark; returns a swatch-style dict for the
     size legend (see `MarkDrawResult.symbol_style`), or None if the mark has
@@ -684,7 +679,6 @@ def draw_marks(ax, cspec, scales: dict, axes_px: tuple[float, float]) -> MarkDra
     for mark, facet in walk_drawable_marks(cspec.marks):
         mtype = mark.get("type")
         if mtype == "symbol":
-            _warn_if_faceted(facet, mtype)
             style = draw_symbol(ax, mark, cspec, scales, registry, dpi)
             if style is not None:
                 symbol_style = style
@@ -693,10 +687,8 @@ def draw_marks(ax, cspec, scales: dict, axes_px: tuple[float, float]) -> MarkDra
         elif mtype == "area":
             draw_area(ax, mark, facet, cspec, scales, registry)
         elif mtype == "rect":
-            _warn_if_faceted(facet, mtype)
             draw_rect(ax, mark, cspec, scales, registry, dpi, axes_px)
         elif mtype == "rule":
-            _warn_if_faceted(facet, mtype)
             draw_rule(ax, mark, cspec, scales, registry)
         else:
             warnings.warn(f"mark type {mtype!r} not yet supported; skipping")
