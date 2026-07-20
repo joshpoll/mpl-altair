@@ -55,6 +55,11 @@ _facet_wrap_df = pd.DataFrame({
     "grp": ["x", "y"] * 5,
     "val": [3, 5, 2, 7, 4, 1, 6, 2, 9, 3],
 })
+_concat_df = pd.DataFrame({"cat": ["a", "b", "c"], "val": [3, 7, 5], "val2": [1, 9, 4]})
+_indep_facet_df = pd.DataFrame({
+    "cat": ["a", "a", "a", "b", "b", "b"],
+    "val": [1.0, 2.0, 1.5, 40.0, 50.0, 45.0],
+})
 
 
 def bar_simple():
@@ -144,6 +149,44 @@ def facet_color_legend():
     return alt.Chart(_facet_df).mark_point().encode(x="val:Q", y="grp:N", color="grp:N", column="cat:N")
 
 
+def concat_hconcat():
+    # Two different mark types, two different explicit widths.
+    scatter = alt.Chart(_concat_df).mark_point().encode(x="val:Q", y="val2:Q").properties(width=200)
+    bar = alt.Chart(_concat_df).mark_bar().encode(x="cat:N", y="val:Q").properties(width=100)
+    return scatter | bar
+
+
+def concat_vconcat():
+    scatter = alt.Chart(_concat_df).mark_point().encode(x="val:Q", y="val2:Q")
+    bar = alt.Chart(_concat_df).mark_bar().encode(x="cat:N", y="val:Q")
+    return scatter & bar
+
+
+def concat_nested():
+    # vconcat containing an hconcat -- a two-level compound chart.
+    scatter = alt.Chart(_concat_df).mark_point().encode(x="val:Q", y="val2:Q")
+    bar = alt.Chart(_concat_df).mark_bar().encode(x="cat:N", y="val:Q")
+    line = alt.Chart(_concat_df).mark_line().encode(x="cat:N", y="val2:Q")
+    return (scatter | bar) & line
+
+
+def repeat_chart():
+    base = alt.Chart(_concat_df)
+    return base.mark_point().encode(
+        x=alt.X(alt.repeat("column"), type="quantitative"), y="val2:Q"
+    ).repeat(column=["val", "val2"])
+
+
+def facet_independent_y():
+    return (
+        alt.Chart(_indep_facet_df)
+        .mark_point()
+        .encode(x="val:Q", y="val:Q")
+        .facet(column="cat:N")
+        .resolve_scale(y="independent")
+    )
+
+
 # (name, builder, kind) -- kind drives the smoke tests' per-type assertions.
 CHARTS = [
     ("bar_simple", bar_simple, "bar"),
@@ -166,6 +209,11 @@ CHARTS = [
     ("facet_row", facet_row, "facet"),
     ("facet_wrap", facet_wrap, "facet"),
     ("facet_color_legend", facet_color_legend, "facet"),
+    ("concat_hconcat", concat_hconcat, "concat"),
+    ("concat_vconcat", concat_vconcat, "concat"),
+    ("concat_nested", concat_nested, "concat"),
+    ("repeat_chart", repeat_chart, "concat"),
+    ("facet_independent_y", facet_independent_y, "facet_independent"),
 ]
 
 # Underlying-data row counts for exact bar/patch-count smoke assertions.
@@ -183,4 +231,12 @@ FACET_PANEL_COUNTS = {
     "facet_row": (3, 3),
     "facet_wrap": (6, 5),  # 5 wrap values, columns=3 -> a ragged 3+2 grid
     "facet_color_legend": (3, 3),
+}
+
+# Expected leaf (real, drawable-child) count for each concat/repeat entry.
+CONCAT_LEAF_COUNTS = {
+    "concat_hconcat": 2,
+    "concat_vconcat": 2,
+    "concat_nested": 3,
+    "repeat_chart": 2,
 }

@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
-from gallery_charts import CHARTS, FACET_PANEL_COUNTS, ROW_COUNTS  # noqa: E402
+from gallery_charts import CHARTS, CONCAT_LEAF_COUNTS, FACET_PANEL_COUNTS, ROW_COUNTS  # noqa: E402
 
 import mplaltair  # noqa: E402
 
@@ -43,6 +43,24 @@ def test_gallery_chart_converts(name, builder, kind):
             assert len(ylims) == 1
             if name == "facet_color_legend":
                 assert fig.legends, "expected a figure-level legend"
+        elif kind == "facet_independent":
+            visible_axes = [a for a in fig.axes if a.get_visible()]
+            assert len(visible_axes) == 2
+            for panel_ax in visible_axes:
+                assert len(panel_ax.collections) >= 1, "panel drew no marks"
+            # Independent y: panels must NOT share limits, and (unlike a
+            # shared axis) every panel keeps its own y tick labels visible.
+            ylims = {panel_ax.get_ylim() for panel_ax in visible_axes}
+            assert len(ylims) == 2
+            for panel_ax in visible_axes:
+                labels = [t.get_text() for t in panel_ax.get_yticklabels() if t.get_text()]
+                assert labels, "independent-y panel should show its own y tick labels"
+        elif kind == "concat":
+            leaves = [a for a in fig.axes if a.get_visible() and a.has_data()]
+            assert len(leaves) == CONCAT_LEAF_COUNTS[name]
+            for leaf_ax in leaves:
+                n_artists = len(leaf_ax.patches) + len(leaf_ax.collections) + len(leaf_ax.get_lines())
+                assert n_artists >= 1, "concat child drew no marks"
         elif kind == "bar":
             assert len(ax.patches) == ROW_COUNTS[name]
         elif kind == "bar_legend":
@@ -169,6 +187,81 @@ def test_convert_with_ax_raises_for_faceted_chart():
     try:
         with pytest.raises(ValueError):
             mplaltair.convert(facet_column(), ax=ax)
+    finally:
+        plt.close(fig)
+
+
+def test_convert_with_ax_raises_for_concat_chart():
+    """Same requirement as a facet -- a concat/repeat layout needs the whole
+    figure (possibly nested subfigures), not one caller-supplied Axes."""
+    from gallery_charts import concat_hconcat
+
+    fig, ax = plt.subplots()
+    try:
+        with pytest.raises(ValueError):
+            mplaltair.convert(concat_hconcat(), ax=ax)
+    finally:
+        plt.close(fig)
+
+
+@pytest.mark.parametrize("name", ["concat_hconcat", "concat_vconcat", "concat_nested", "repeat_chart"])
+def test_concat_leaf_size_within_tolerance(name):
+    """Each concat/repeat leaf's axes box should approximate its own target
+    px size. Unlike the facet/single-view 2% tolerance (`finalize_figure_size`
+    resizes ONE uniform target), `_convert_concat`'s per-leaf `correction`
+    fixed-point loop (see its docstring) is a coarser approximation for a
+    grid of heterogeneously-sized, independently-scaled children -- this
+    checks the tolerance it actually achieves on the gallery entries
+    (empirically <=5%), not the tighter 2% bound.
+    """
+    from gallery_charts import CHARTS as _CHARTS
+    from mplaltair._compile import compile_chart
+    from mplaltair._layout import child_axes_px, compute_concat_sizes
+    from mplaltair._scales import build_scales
+
+    builder = {c[0]: c[1] for c in _CHARTS}[name]
+    chart = builder()
+    cspec, _ = compile_chart(chart.to_dict())
+    scales = build_scales(cspec)
+
+    def leaf_size(leaf):
+        return child_axes_px(cspec, scales, leaf.width_signal, leaf.height_signal, leaf.x_scale, leaf.y_scale)
+
+    def collect_targets(sized):
+        if sized.children is None:
+            return [(sized.true_w, sized.true_h)]
+        out = []
+        for child in sized.children:
+            out.extend(collect_targets(child))
+        return out
+
+    targets = collect_targets(compute_concat_sizes(cspec.concat, leaf_size))
+
+    fig = mplaltair.convert(chart)
+    try:
+        fig.canvas.draw()
+        leaves = [a for a in fig.axes if a.get_visible() and a.has_data()]
+        assert len(leaves) == len(targets)
+        for ax, (target_w, target_h) in zip(leaves, targets):
+            bbox = ax.get_window_extent()
+            assert abs(bbox.width - target_w) <= 0.05 * target_w
+            assert abs(bbox.height - target_h) <= 0.05 * target_h
+    finally:
+        plt.close(fig)
+
+
+def test_independent_facet_scale_resolution_no_warning():
+    """Phase 4: independent facet scale resolution is supported now -- it
+    must not emit the old "not supported; using shared scales" warning."""
+    import warnings
+
+    from gallery_charts import facet_independent_y
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        fig = mplaltair.convert(facet_independent_y())
+    try:
+        assert not any("independent" in str(w.message) for w in caught)
     finally:
         plt.close(fig)
 

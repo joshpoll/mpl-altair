@@ -54,17 +54,21 @@ def apply_axis_titles(ax, cspec) -> None:
             ax.set_ylabel(title)
 
 
-def apply_facet_headers(axes_grid, keys_grid, facet) -> None:
-    """Per-panel chrome for a faceted grid: hide interior tick labels
-    (`label_outer`), set column-header titles / row-header side labels (or,
-    for a wrapped facet, a per-cell title), and patch up the one case
-    `label_outer` gets wrong for a ragged wrapped grid.
+def apply_facet_headers(axes_grid, keys_grid, facet, share_x: bool = True, share_y: bool = True) -> None:
+    """Per-panel chrome for a faceted grid: hide interior tick labels on a
+    SHARED axis, set column-header titles / row-header side labels (or, for
+    a wrapped facet, a per-cell title).
 
-    `label_outer` hides x tick labels for every panel not in the grid's
-    *last row* -- correct for a full grid, but a ragged wrapped grid's last
-    populated row can be shorter than earlier rows, leaving a column's
-    bottom-most panel (not in the grid's last row, but with nothing below
-    it) unlabeled. The second pass here re-shows that panel's labels.
+    Tick-label hiding is done directly (`ax.tick_params(labelbottom=False)`/
+    `labelleft=False`) rather than via mpl's `Axes.label_outer()`, for two
+    reasons: (1) `label_outer` always hides both axes based on grid
+    position alone, with no way to hide only one of x/y -- wrong for an
+    independently-resolved axis (`share_x`/`share_y` False), whose every
+    panel needs its own tick labels visible regardless of grid position;
+    (2) computing "last POPULATED row per column" up front (below) instead
+    of calling `label_outer` (which only knows the grid's actual last row)
+    handles a ragged wrapped grid correctly in the same pass, rather than
+    needing a separate patch-up pass afterward.
 
     `axes_grid`/`keys_grid` are the 2D (nrows x ncols) arrays built by
     `_facet_panel_keys` et al in `__init__.py` -- `keys_grid[i][j]` is
@@ -73,13 +77,23 @@ def apply_facet_headers(axes_grid, keys_grid, facet) -> None:
     nrows = len(axes_grid)
     ncols = len(axes_grid[0]) if nrows else 0
 
+    last_row_in_col = {}
+    for j in range(ncols):
+        populated = [i for i in range(nrows) if keys_grid[i][j] is not None]
+        if populated:
+            last_row_in_col[j] = populated[-1]
+
     for i in range(nrows):
         for j in range(ncols):
             key = keys_grid[i][j]
             if key is None:
                 continue
             panel_ax = axes_grid[i][j]
-            panel_ax.label_outer()
+
+            if share_x and i != last_row_in_col.get(j):
+                panel_ax.tick_params(labelbottom=False)
+            if share_y and j != 0:
+                panel_ax.tick_params(labelleft=False)
 
             if facet.kind == "wrap":
                 panel_ax.set_title(str(key[facet.col_field]))

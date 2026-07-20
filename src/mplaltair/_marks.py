@@ -11,8 +11,6 @@ import matplotlib as mpl
 import numpy as np
 import pandas as pd
 
-from ._compile import is_concat_group
-
 
 # Vega-Lite's compiled-in default mark color/point-stroke -- a literal hex,
 # not a scale-resolved value, so it never passes through an MplScale. Single
@@ -692,8 +690,6 @@ def draw_marks(ax, cspec, scales: dict, axes_px: tuple[float, float]) -> MarkDra
             draw_rect(ax, mark, cspec, scales, registry, dpi, axes_px)
         elif mtype == "rule":
             draw_rule(ax, mark, cspec, scales, registry)
-        elif mtype == "group" and is_concat_group(mark):
-            warnings.warn("concat charts not yet supported; skipping")
         else:
             warnings.warn(f"mark type {mtype!r} not yet supported; skipping")
     for artist in (*ax.lines, *ax.collections, *ax.patches):

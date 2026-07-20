@@ -77,15 +77,6 @@ def _is_cell_group(m: dict) -> bool:
     return style == "cell"
 
 
-def is_concat_group(m: dict) -> bool:
-    """True for a top-level `group` mark that's one sub-chart of an
-    (h/v)concat layout -- Vega-Lite names these `concat_<N>_group`. Not yet
-    rendered (concat support is a future phase); callers use this to give a
-    concat-specific warning instead of the generic "mark type not supported"
-    one."""
-    return m.get("type") == "group" and "concat" in (m.get("name") or "")
-
-
 # Header/footer role groups that carry the facet's recovered axis definitions
 # (titles, grid) -- the `cell` group itself also carries a (grid-only) axis
 # entry per continuous position scale, so it's included by the caller too.
@@ -108,6 +99,25 @@ def _collect_facet_axes(marks: list[dict]) -> list[dict]:
 
 
 @dataclass
+class IndependentScale:
+    """One independently-resolved (`resolve: {scale: {<axis>: "independent"}}`)
+    facet axis. `local_name` is the scale name the cell's own marks/axes
+    reference (Vega-Lite always names these "child_x"/"child_y", nested
+    inside the `cell` group's own `scales` list rather than the compiled
+    spec's top-level `scales` -- an independent axis has NO top-level scale
+    at all). `scale_spec` is that nested scale's raw Vega dict (type,
+    zero/nice flags, ...); `field` is the data field its marks read off (so
+    a panel's domain can be computed straight from that panel's own rows --
+    see `_scales.build_panel_scale` for why: vegafusion never inlines a
+    per-facet-value domain-summary dataset, only Vega's own per-cell group
+    cloning would evaluate one, which happens after our pipeline runs)."""
+
+    local_name: str
+    scale_spec: dict
+    field: str
+
+
+@dataclass
 class FacetInfo:
     """Structure recovered from a faceted spec's `cell` group + `layout` block.
 
@@ -118,7 +128,10 @@ class FacetInfo:
     `cell_marks` is the facet `cell` group's own inner mark list (the real
     per-row mark defs, e.g. a `symbol`/`rect` mark reading `from.data ==
     "facet"`) -- rendering plugs a per-panel-filtered "facet" dataset entry
-    in and draws these directly, one panel at a time.
+    in and draws these directly, one panel at a time. `independent` holds an
+    `IndependentScale` per axis ("x" and/or "y") that isn't shared across
+    panels; an axis absent from this dict uses the ordinary shared top-level
+    scale, same as before independent resolution existed.
     """
 
     dataset: str
@@ -129,6 +142,7 @@ class FacetInfo:
     col_values: list
     wrap_columns: int | None
     cell_marks: list[dict]
+    independent: dict[str, IndependentScale] = field(default_factory=dict)
 
 
 def _facet_domain_values(datasets: dict[str, list[dict]], dataset_name: str, field_name: str) -> list:
@@ -136,6 +150,39 @@ def _facet_domain_values(datasets: dict[str, list[dict]], dataset_name: str, fie
     if not rows:
         return []
     return [r[field_name] for r in rows if field_name in r]
+
+
+def _field_for_scale(marks: list[dict], scale_name: str) -> str | None:
+    """The data field a mark list's `encode.update` channel scale-qualified
+    with `scale_name` reads -- e.g. for `{"y": {"field": "val", "scale":
+    "child_y"}}`, `_field_for_scale(marks, "child_y") == "val"`. Used to
+    recover which field an independently-resolved facet axis aggregates,
+    since the (per-facet-value) domain vegafusion would otherwise hand us
+    isn't inlined -- see `IndependentScale`."""
+    for m in marks:
+        for entry in m.get("encode", {}).get("update", {}).values():
+            if isinstance(entry, dict) and entry.get("scale") == scale_name and "field" in entry:
+                return entry["field"]
+    return None
+
+
+def _parse_independent_scales(cell: dict) -> dict[str, "IndependentScale"]:
+    """Recover `cell`'s own nested (independently-resolved) scales, keyed by
+    axis ("x"/"y"). Vega-Lite names these "child_x"/"child_y" -- the same
+    naming convention as the `child_width`/`child_height` size signals."""
+    cell_scales = {s["name"]: s for s in cell.get("scales", [])}
+    cell_marks = cell.get("marks", [])
+    independent: dict[str, IndependentScale] = {}
+    for axis, local_name in (("x", "child_x"), ("y", "child_y")):
+        if local_name not in cell_scales:
+            continue
+        scale_field = _field_for_scale(cell_marks, local_name)
+        if scale_field is None:
+            continue
+        independent[axis] = IndependentScale(
+            local_name=local_name, scale_spec=cell_scales[local_name], field=scale_field,
+        )
+    return independent
 
 
 def _parse_facet(spec: dict, datasets: dict[str, list[dict]]) -> "FacetInfo | None":
@@ -215,7 +262,129 @@ def _parse_facet(spec: dict, datasets: dict[str, list[dict]]) -> "FacetInfo | No
         row_field=row_field, col_field=col_field,
         row_values=row_values, col_values=col_values,
         wrap_columns=wrap_columns, cell_marks=cell.get("marks", []),
+        independent=_parse_independent_scales(cell),
     )
+
+
+@dataclass
+class ConcatLeaf:
+    """A single-view child of a concat/hconcat/vconcat/repeat layout: its own
+    marks, merged axes, x/y scale *names* (Vega-Lite gives every concat
+    child its own namespaced position scales by default, e.g. "concat_0_x"
+    -- these are ordinary entries in the compiled spec's top-level `scales`,
+    just like a single-view chart's "x"/"y", only name-prefixed), and the
+    signal name its own width/height is driven by (a literal in
+    `cspec.signals`, or -- for a band-scale-driven child -- absent, falling
+    back to the same band-derived-size math a single-view chart's `x`/`y`
+    already uses, just parameterized on this child's own scale names)."""
+
+    marks: list[dict]
+    axes: list[dict]
+    x_scale: str | None
+    y_scale: str | None
+    width_signal: str | None
+    height_signal: str | None
+
+
+@dataclass
+class ConcatUnsupported:
+    """A concat/repeat child we recognized but don't render -- currently
+    just a faceted child (facet-inside-concat nesting; concat-inside-facet
+    isn't a thing Vega-Lite produces). `reason` is shown as a warning and as
+    placeholder text on that child's Axes."""
+
+    reason: str
+
+
+@dataclass
+class ConcatInfo:
+    """Structure recovered from a concat/hconcat/vconcat/repeat spec (or
+    nested concat sub-tree): an ordered list of children, each a
+    `ConcatLeaf` (single view), nested `ConcatInfo` (concat-of-concat, e.g.
+    `vconcat` containing an `hconcat`), or `ConcatUnsupported`.
+
+    `columns`, mirroring `FacetInfo.wrap_columns`, is read straight off this
+    node's own `layout.columns`: absent -> hconcat shape (all children in
+    one row), `1` -> vconcat shape (all children in one column), `N > 1` ->
+    a general `alt.concat(..., columns=N)` wrap grid. `_concat_grid_shape`
+    in `__init__.py` turns this into an actual (nrows, ncols).
+    """
+
+    children: list["ConcatLeaf | ConcatInfo | ConcatUnsupported"]
+    columns: int | None
+
+
+def _is_concat_node(m: dict) -> bool:
+    """True for a `group` mark that's a concat/repeat child or sub-tree
+    (never a facet's own header/footer/title/cell groups, and never a plain
+    single-view chart's `pathgroup` line/area grouping) -- anything
+    `type: "group"` with no `from.facet`. A facet's `cell` group is the one
+    `type: "group"` mark that DOES have `from.facet`, so it's excluded here;
+    everything else inside a facet's top-level marks (row_header,
+    column_header, ...) also has no `from.facet`, but `CompiledSpec.from_vega`
+    only calls `_parse_concat` after `_parse_facet` has already claimed the
+    spec, so those never reach this function on a genuine facet spec."""
+    return m.get("type") == "group" and "facet" not in m.get("from", {})
+
+
+_ORIENT_TO_XY = {"bottom": "x", "top": "x", "left": "y", "right": "y"}
+
+
+def _concat_leaf_scale_names(cell: dict) -> tuple[str | None, str | None]:
+    """A concat leaf's own x/y scale names, read off its `axes` list's
+    orientation (bottom/top -> x, left/right -> y) rather than assumed from
+    a naming convention -- concat leaf scale names vary (`concat_0_x` for
+    `hconcat`/`vconcat`, `child__column_val_x` for `repeat`)."""
+    x_scale = y_scale = None
+    for ax in cell.get("axes", []):
+        which = _ORIENT_TO_XY.get(ax.get("orient"))
+        if which == "x" and x_scale is None:
+            x_scale = ax.get("scale")
+        elif which == "y" and y_scale is None:
+            y_scale = ax.get("scale")
+    return x_scale, y_scale
+
+
+def _parse_concat_leaf(cell: dict) -> ConcatLeaf:
+    update = cell.get("encode", {}).get("update", {})
+    width_sig = (update.get("width") or {}).get("signal")
+    height_sig = (update.get("height") or {}).get("signal")
+    x_scale, y_scale = _concat_leaf_scale_names(cell)
+    return ConcatLeaf(
+        marks=cell.get("marks", []), axes=_merge_axes(cell.get("axes", [])),
+        x_scale=x_scale, y_scale=y_scale,
+        width_signal=width_sig, height_signal=height_sig,
+    )
+
+
+def _parse_concat(node: dict) -> "ConcatInfo | None":
+    """Recover concat structure from `node` (the top-level pre-transformed
+    spec, or a nested concat-shaped `group` mark found inside another
+    `ConcatInfo`'s children) -- None if `node`'s marks aren't all concat-
+    shaped (i.e. `node` isn't actually a concat/repeat spec)."""
+    marks = node.get("marks", [])
+    if not marks or not all(m.get("type") == "group" for m in marks):
+        return None
+
+    children: list["ConcatLeaf | ConcatInfo | ConcatUnsupported"] = []
+    for m in marks:
+        if _is_cell_group(m) and m.get("from", {}).get("facet"):
+            children.append(ConcatUnsupported(
+                reason="a faceted chart inside a concat/repeat layout is not yet supported"
+            ))
+        elif _is_cell_group(m):
+            children.append(_parse_concat_leaf(m))
+        elif _is_concat_node(m):
+            nested = _parse_concat(m)
+            if nested is None:
+                return None  # not actually concat-shaped after all
+            children.append(nested)
+        else:
+            return None
+
+    columns = node.get("layout", {}).get("columns")
+    ncols = int(columns) if isinstance(columns, (int, float)) else None
+    return ConcatInfo(children=children, columns=ncols)
 
 
 @dataclass
@@ -229,6 +398,7 @@ class CompiledSpec:
     legends: list[dict] = field(default_factory=list)
     signals: dict[str, Any] = field(default_factory=dict)
     facet: "FacetInfo | None" = None
+    concat: "ConcatInfo | None" = None
 
     @classmethod
     def from_vega(cls, spec: dict) -> "CompiledSpec":
@@ -259,6 +429,11 @@ class CompiledSpec:
             height = signals["child_height"]
 
         facet_info = _parse_facet(spec, datasets)
+        # `_parse_concat` is only tried once a genuine facet has been ruled
+        # out -- see `_is_concat_node`'s docstring for why this ordering
+        # matters (a facet's own header/footer/title groups would otherwise
+        # look concat-shaped).
+        concat_info = _parse_concat(spec) if facet_info is None else None
         raw_axes = list(spec.get("axes", []) or [])
         if facet_info is not None:
             raw_axes += _collect_facet_axes(spec.get("marks", []))
@@ -273,6 +448,7 @@ class CompiledSpec:
             legends=spec.get("legends", []),
             signals=signals,
             facet=facet_info,
+            concat=concat_info,
         )
 
 
