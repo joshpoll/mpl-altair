@@ -8,13 +8,13 @@ Each pair shows the same Altair chart rendered by Vega-Lite's own renderer (left
 
 | Altair (vl-convert) | mpl-altair |
 | --- | --- |
-| <img src="docs/images/bar_stacked_vl.png" height="260"> | <img src="docs/images/bar_stacked_ours.png" height="260"> |
-| <img src="docs/images/line_multi_temporal_vl.png" height="280"> | <img src="docs/images/line_multi_temporal_ours.png" height="280"> |
-| <img src="docs/images/scatter_size_vl.png" height="280"> | <img src="docs/images/scatter_size_ours.png" height="280"> |
+| <img src="https://raw.githubusercontent.com/joshpoll/mpl-altair/main/docs/images/bar_stacked_vl.png" height="260"> | <img src="https://raw.githubusercontent.com/joshpoll/mpl-altair/main/docs/images/bar_stacked_ours.png" height="260"> |
+| <img src="https://raw.githubusercontent.com/joshpoll/mpl-altair/main/docs/images/line_multi_temporal_vl.png" height="280"> | <img src="https://raw.githubusercontent.com/joshpoll/mpl-altair/main/docs/images/line_multi_temporal_ours.png" height="280"> |
+| <img src="https://raw.githubusercontent.com/joshpoll/mpl-altair/main/docs/images/scatter_size_vl.png" height="280"> | <img src="https://raw.githubusercontent.com/joshpoll/mpl-altair/main/docs/images/scatter_size_ours.png" height="280"> |
 
 Because the output is a real matplotlib figure, any matplotlib style restyles the whole chart. This is the same stacked bar converted with `style="dark_background"`:
 
-<img src="docs/images/bar_stacked_dark_ours.png" height="260">
+<img src="https://raw.githubusercontent.com/joshpoll/mpl-altair/main/docs/images/bar_stacked_dark_ours.png" height="260">
 
 ## Quickstart
 
