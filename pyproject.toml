@@ -17,6 +17,24 @@ dependencies = [
     "pandas",
     "numpy",
 ]
+keywords = ["altair", "matplotlib", "vega-lite", "visualization", "charts"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Matplotlib",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
+
+[project.urls]
+Homepage = "https://github.com/joshpoll/mpl-altair"
+Repository = "https://github.com/joshpoll/mpl-altair"
+Issues = "https://github.com/joshpoll/mpl-altair/issues"
 
 [dependency-groups]
 dev = [
